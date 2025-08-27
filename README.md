@@ -1,2 +1,2 @@
 # gastos_robot
-Robot para introducir automáticamente apuntos de gastos en SICAL
+Robot para introducir automáticamente apuntes de gastos en SICAL
