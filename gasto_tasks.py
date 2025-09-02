@@ -8,6 +8,7 @@ from typing import Dict, Any, Optional
 from dataclasses import dataclass, field
 from enum import Enum
 import logging
+import ctypes
 
 
 
@@ -162,14 +163,18 @@ def setup_consulta_op_window(window_manager: ConsultaOpSicalWindowManager, logge
     rama_consulta_operaciones = ('CONSULTAS AVANZADAS', 'CONSULTA DE OPERACIONES')
     
     if not abrir_ventana_opcion_en_menu(rama_consulta_operaciones, logger):
-        #si no está abierta la ventana gasto esperar un poco más
-        time.sleep(2)
+        #si no está abierta la ventana gasto esperar un poco más 
+        #DEVUELVE FALSE SOLO SI FMENUSICAL ESTA CERRADO
+        time.sleep(3)
         if not abrir_ventana_opcion_en_menu(rama_consulta_operaciones, logger):
             logger.critical(f"Imposible abrir ventana: {rama_consulta_operaciones}")
             return False
-    
+        
+    # ESPERAMOS UN POCO A QUE SE ABRA LA VENTANA CONSULTA
+    time.sleep(2)
     window_manager.ventana_proceso = window_manager.find_proceso_window()
     window_manager.logger.debug(f"VENTANA proceso {window_manager.ventana_proceso}")
+
     return bool(window_manager.ventana_proceso)
 
 def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> OperationResult:
@@ -218,11 +223,16 @@ def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> Opera
                 result.sical_is_open = True
                 result.status = OperationStatus.IN_PROGRESS
             
+            
+            
             result = consultar_operacion_en_SICAL(consulta_op_window_manager.ventana_proceso, datos_ado, result)
+            
             if result.status == OperationStatus.FAILED:
                 return result
             elif result.status == OperationStatus.P_DUPLICATED:
-                gasto_logger.critical(f"Posiblidad de operacion duplicada, registros simimares: {result.similiar_records_encountered}")
+                txt_message = f"Posiblidad de operacion duplicada, registros simimares: {result.similiar_records_encountered}"
+                gasto_logger.critical(txt_message)
+                show_windows_message_box(txt_message=txt_message, txt_title="Proceso abortado")
                 return result
             elif result.status == OperationStatus.IN_PROGRESS:
                 pass
@@ -985,7 +995,8 @@ def consultar_operacion_en_SICAL(ventana_proceso, datos_ado: Dict[str, Any], res
             logger.critical("No existen registros similares")
             click_ok_button = ventana_filtros_op.find('class:"TButton" and name:"OK"').click()
             close_filtros = ventana_filtros_op.find('control:"ButtonControl" and name:"Cerrar"').click()
-            close_consulta_op = ventana_proceso.find('class:"TBitBtn" and name:"Salir"').click()
+            # No cerramos la ventana consulta, luego la necesitamos para imprimir y nos ahorramos abrirla
+            # close_consulta_op = ventana_proceso.find('class:"TBitBtn" and name:"Salir"').click()
             time.sleep(0.1)
 
         result.completed_phases.append({1: f'Registros similares consultados: {result.similiar_records_encountered} encontrados'})
@@ -997,6 +1008,18 @@ def consultar_operacion_en_SICAL(ventana_proceso, datos_ado: Dict[str, Any], res
    
     return result
 
+def show_windows_message_box(txt_message, txt_title):
+    # Constantes de MessageBox
+    MB_OK = 0x0
+    MB_OKCANCEL = 0x1
+    MB_ICONINFORMATION = 0x40
+    MB_ICONWARNING = 0x30
+    MB_ICONERROR = 0x10
+    MB_SYSTEMMODAL = 0x1000
+    # Define the MessageBoxW function
+    MessageBox = ctypes.windll.user32.MessageBoxW
+    # 0x40 is the icon type for information, 0x0 for no options, "Message text" is your message, "Title" is the message box title
+    MessageBox(None, txt_message, txt_title, MB_SYSTEMMODAL | MB_ICONINFORMATION )
 
 
 

@@ -56,14 +56,25 @@ class TesoreriaPagosSicalWindowManager:
 @task()
 def prueba_pago():
     operation_data =  {
-        'num_operacion' : '225102320',
+        'num_operacion' : '225102376',
         'num_lista': None,
-        'fecha_ordenamiento': '01012025',
+        'fecha_ordenamiento': '01092025',
         'fecha_pago': None,
     }
     result = ordenarypagar_gasto(operation_data)
     print(result)
 
+import ctypes
+
+@task
+def show_windows_message_box():
+    # Define the MessageBoxW function
+    MessageBox = ctypes.windll.user32.MessageBoxW
+    # 0x40 is the icon type for information, 0x0 for no options, "Message text" is your message, "Title" is the message box title
+    MessageBox(None, "Your message here", "Your title here", 0x40)
+
+# Remember, this script uses ctypes to interact with Windows APIs directly,
+# so it will only work on Windows operating systems.
 
 def ordenarypagar_gasto(operation_data: Dict[str, Any]) -> OperationResult:
     """
