@@ -54,21 +54,10 @@ class GastoConsumer:
         Process incoming messages from RabbitMQ.
         This is called automatically by pika for each message received.
 
-        New message format (v2):
+        Message format (v2):
         {
             "tipo": "ado220|pmp450|ordenarypagar",
-            "detalle": {...}
-        }
-
-        Legacy format (v1) - still supported:
-        {
-            "task_id": "...",
-            "operation_data": {
-                "operation": {
-                    "tipo": "...",
-                    ...
-                }
-            }
+            "detalle": {...operation-specific fields...}
         }
         """
         self.logger.critical(f"Received message with correlation_id: {properties.correlation_id}")
@@ -84,22 +73,18 @@ class GastoConsumer:
                 sical_is_open=False
             )
 
-            # Detect message format and extract operation data
-            # New format (v2): tipo and detalle at root level
-            if "tipo" in data and "detalle" in data:
-                operation_type = data.get("tipo", "Unknown")
-                operation_data = data.get("detalle", {})
-                # Add tipo to operation_data for backwards compatibility
-                operation_data["tipo"] = operation_type
-                self.logger.info(f"Processing new format (v2) message: tipo={operation_type}")
-            # Legacy format (v1): nested structure
-            elif "operation_data" in data:
-                operation_data = data.get("operation_data", {}).get("operation", {})
-                operation_type = operation_data.get("tipo", "Unknown")
-                self.logger.info(f"Processing legacy format (v1) message: tipo={operation_type}")
-            else:
-                self.logger.error(f"Unknown message format: {data}")
-                raise ValueError("Unknown message format - missing 'tipo' or 'operation_data'")
+            # Extract operation type and data from v2 format
+            if "tipo" not in data or "detalle" not in data:
+                self.logger.error(f"Invalid message format: {data}")
+                raise ValueError("Invalid message format - must contain 'tipo' and 'detalle' fields")
+
+            operation_type = data.get("tipo")
+            operation_data = data.get("detalle", {})
+
+            # Add tipo to operation_data for handler functions
+            operation_data["tipo"] = operation_type
+
+            self.logger.info(f"Processing message: tipo={operation_type}")
 
             # Route to appropriate handler based on operation type
             if operation_type == "ado220":

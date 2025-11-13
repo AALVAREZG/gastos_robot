@@ -145,30 +145,21 @@ def ordenarypagar_gasto(operation_data: Dict[str, Any]) -> OperationResult:
 
 def create_pago_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Transform operation data from message into SICAL-compatible format.
+    Transform operation data from v2 message format into SICAL-compatible format.
     If not fecha_pago, same date as fecha_ordenamiento.
 
-    Supports both new format (v2) and legacy format (v1):
-    - v2: dates may be in DD/MM/YYYY format
-    - v1: dates are in DDMMYYYY format
-
     Args:
-        operation_data: Operation data from RabbitMQ message
+        operation_data: Operation data from RabbitMQ message (v2 format)
 
     Returns:
         Transformed payment data compatible with SICAL processing functions
     """
-    def normalize_date(date_value):
-        """Convert DD/MM/YYYY to DDMMYYYY if needed"""
-        if date_value and '/' in str(date_value):
-            return str(date_value).replace('/', '')
-        return date_value
+    # Convert dates from DD/MM/YYYY to DDMMYYYY format required by SICAL
+    fecha_orden = operation_data.get('fecha_ordenamiento', operation_data.get('fecha', ''))
+    fecha_orden = fecha_orden.replace('/', '') if fecha_orden else ''
 
-    fecha_orden_raw = operation_data.get('fecha_ordenamiento', operation_data.get('fecha'))
-    fecha_orden = normalize_date(fecha_orden_raw)
-
-    fecha_pago_raw = operation_data.get('fecha_pago', fecha_orden_raw)
-    fecha_pago = normalize_date(fecha_pago_raw)
+    fecha_pago = operation_data.get('fecha_pago', fecha_orden)
+    fecha_pago = fecha_pago.replace('/', '') if fecha_pago else fecha_orden
 
     return {
         'num_operacion': operation_data.get('num_operacion'),
