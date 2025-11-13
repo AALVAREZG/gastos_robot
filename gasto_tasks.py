@@ -352,16 +352,34 @@ def handle_error_cleanup(ventana_proceso=None):
 
 
 def create_ado_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Transform operation data from message into SICAL-compatible format"""
+    """
+    Transform operation data from message into SICAL-compatible format.
+
+    Supports both new format (v2) and legacy format (v1):
+    - v2: texto_sical array, date with slashes, caja with bank name
+    - v1: texto string, date without slashes, simple caja code
+
+    Args:
+        operation_data: Operation data from RabbitMQ message
+
+    Returns:
+        Transformed data compatible with SICAL processing functions
+    """
     datos_220ADO_PLANTILLA_NOUSADO =  {
         'fecha':'23042024', 'expediente':'rbt-apunte-ADO', 'tercero' :'A28141935',
-        'fpago': '10', 'tpago': '10', 'caja': '200', 
-        'texto':'RECIBO POLIZA 0960270022271 23042024 - 23072024 RESP. CIVIL', 
+        'fpago': '10', 'tpago': '10', 'caja': '200',
+        'texto':'RECIBO POLIZA 0960270022271 23042024 - 23072024 RESP. CIVIL',
         'aplicaciones': [{'funcional':'920', 'economica':'224', 'gfa':None, 'importe':'1745.06', 'cuenta':'625'},]
         }
-    
-    texto_operacion = str(operation_data.get('texto', 'ADO....'))
-    
+
+    # Extract texto field - handle both v2 (texto_sical array) and v1 (texto string)
+    if 'texto_sical' in operation_data and operation_data['texto_sical']:
+        # New format (v2): texto_sical is array of objects
+        texto_operacion = str(operation_data['texto_sical'][0].get('texto_ado', 'ADO....'))
+    else:
+        # Legacy format (v1): texto is string
+        texto_operacion = str(operation_data.get('texto', 'ADO....'))
+
     ## TEMPORALMENTE, USAMOS ESTE TRUCO PARA FINALIZAR OPERACIÓN
     ## COMPROBAMOS SI EL TEXTO DE LA OPERACIÓN ACABA EN _FIN
 
@@ -371,16 +389,38 @@ def create_ado_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
     else:
         finalizar_operacion = False
 
+    # Extract fecha - handle both DD/MM/YYYY and DDMMYYYY formats
+    fecha_raw = operation_data.get('fecha', '')
+    if '/' in fecha_raw:
+        # New format (v2): DD/MM/YYYY -> convert to DDMMYYYY
+        fecha = fecha_raw.replace('/', '')
+    else:
+        # Legacy format (v1): already DDMMYYYY
+        fecha = fecha_raw
+
+    # Extract caja - handle both "200_CAIXABNK - 2064" and "200" formats
+    caja_raw = operation_data.get('caja', '200')
+    if '_' in caja_raw:
+        # New format (v2): "200_CAIXABNK - 2064" -> extract "200"
+        caja = caja_raw.split('_')[0]
+    else:
+        # Legacy format (v1): already simple code
+        caja = caja_raw
+
     return {
-        'fecha': operation_data.get('fecha'),
+        'fecha': fecha,
         'expediente': operation_data.get('expediente', 'rbt-apunte-ADO'),
         'tercero': operation_data.get('tercero'),
         'fpago': operation_data.get('fpago', '10'),
         'tpago': operation_data.get('tpago', '10'),
-        'caja': operation_data.get('caja'),
+        'caja': caja,
+        'caja_tercero': operation_data.get('caja_tercero'),  # New field (v2)
         'texto': texto_operacion,
         'aplicaciones': create_aplicaciones(operation_data.get('aplicaciones', [])),
-        'finalizar_operacion': finalizar_operacion
+        'finalizar_operacion': finalizar_operacion,
+        'descuentos': operation_data.get('descuentos', []),  # New field (v2)
+        'aux_data': operation_data.get('aux_data', {}),  # New field (v2)
+        'metadata': operation_data.get('metadata', {})  # New field (v2)
     }
 
 def clean_value(value):
@@ -400,17 +440,59 @@ def clean_value(value):
 
 
 def create_aplicaciones(final_data: list) -> list:
-    """Transform aplicaciones data into SICAL-compatible format"""
+    """
+    Transform aplicaciones data into SICAL-compatible format.
+
+    Supports both new format (v2) and legacy format (v1):
+    - v2: includes year, proyecto, contraido, base_imponible, tipo, cuenta_pgp, aux
+    - v1: includes gfa field, simpler structure
+
+    Args:
+        final_data: List of aplicacion objects from message
+
+    Returns:
+        List of aplicaciones in SICAL-compatible format
+    """
     aplicaciones = []
-    for aplicacion in final_data:  # Exclude last item (total)
-        aplicaciones.append({
+    for aplicacion in final_data:
+        # Handle both 'proyecto' (v2) and 'gfa' (v1) fields
+        gfa_proyecto = aplicacion.get('proyecto') or aplicacion.get('gfa', None)
+
+        # Get economica code and determine cuenta
+        economica = str(aplicacion['economica'])
+
+        # Prefer cuenta_pgp from message (v2), fallback to mapping table
+        if 'cuenta_pgp' in aplicacion and aplicacion['cuenta_pgp']:
+            cuenta = str(aplicacion['cuenta_pgp'])
+        else:
+            cuenta = partidas_gasto_cuentaPG.get(economica, '000')
+
+        # Convert importe to string (handles both float and string input)
+        importe = str(aplicacion['importe'])
+
+        aplicacion_obj = {
             'funcional': str(aplicacion['funcional']),
-            'economica': str(aplicacion['economica']),
-            'gfa': aplicacion.get('gfa', None),
-            'importe': str(aplicacion['importe']),
-            'cuenta': partidas_gasto_cuentaPG.get(str(aplicacion['economica']), '000'),
+            'economica': economica,
+            'gfa': gfa_proyecto,
+            'importe': importe,
+            'cuenta': cuenta,
             'otro': False,
-        })
+        }
+
+        # Add new fields from v2 format if present
+        if 'year' in aplicacion:
+            aplicacion_obj['year'] = str(aplicacion['year'])
+        if 'contraido' in aplicacion:
+            aplicacion_obj['contraido'] = bool(aplicacion['contraido'])
+        if 'base_imponible' in aplicacion:
+            aplicacion_obj['base_imponible'] = float(aplicacion['base_imponible'])
+        if 'tipo' in aplicacion:
+            aplicacion_obj['tipo'] = float(aplicacion['tipo'])
+        if 'aux' in aplicacion:
+            aplicacion_obj['aux'] = str(aplicacion['aux'])
+
+        aplicaciones.append(aplicacion_obj)
+
     return aplicaciones
 
 

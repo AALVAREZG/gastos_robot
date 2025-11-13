@@ -1,0 +1,9 @@
+{
+  "tipo": "ordenarypagar",
+  "detalle": {
+    "num_operacion": "225101450",
+    "num_lista": null,
+    "fecha_ordenamiento": "17/09/2025",
+    "fecha_pago": "20/09/2025"
+  }
+}

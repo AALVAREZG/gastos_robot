@@ -1,0 +1,36 @@
+{
+  "tipo": "ado220",
+  "detalle": {
+    "fecha": "17/09/2025",
+    "tercero": "P4001500D",
+    "caja": "200_CAIXABNK - 2064",
+    "caja_tercero": "001",
+    "expediente": "EXP-2025-001",
+    "fpago": "10",
+    "tpago": "10",
+    "texto_sical": [
+      {
+        "texto_ado": "PAGO A PROVEEDOR _FIN"
+      }
+    ],
+    "aplicaciones": [
+      {
+        "year": "2025",
+        "funcional": "1234",
+        "economica": "220",
+        "proyecto": "GFA-001",
+        "contraido": false,
+        "base_imponible": 0.0,
+        "tipo": 0.0,
+        "importe": 150.00,
+        "cuenta_pgp": "629",
+        "aux": ""
+      }
+    ],
+    "descuentos": [],
+    "aux_data": {},
+    "metadata": {
+      "generation_datetime": "2025-01-13T10:30:00.000Z"
+    }
+  }
+}

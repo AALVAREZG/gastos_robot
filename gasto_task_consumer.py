@@ -53,25 +53,55 @@ class GastoConsumer:
         """
         Process incoming messages from RabbitMQ.
         This is called automatically by pika for each message received.
+
+        New message format (v2):
+        {
+            "tipo": "ado220|pmp450|ordenarypagar",
+            "detalle": {...}
+        }
+
+        Legacy format (v1) - still supported:
+        {
+            "task_id": "...",
+            "operation_data": {
+                "operation": {
+                    "tipo": "...",
+                    ...
+                }
+            }
+        }
         """
         self.logger.critical(f"Received message with correlation_id: {properties.correlation_id}")
-        
+
         try:
             # Parse the incoming message
             data = json.loads(body)
             self.logger.info(f"Message content: {data}")
-            # Process the arqueo operation
 
-            #result = operacion_arqueo(data['operation_data']['operation'])
-            
             test_result = OperationResult (
                 status = OperationStatus.PENDING,
                 init_time= None,
                 sical_is_open=False
             )
-            # Accessing nested values safely
-            operation_data = data.get("operation_data", {}).get("operation", {})
-            operation_type = data.get("operation_data", {}).get("operation", {}).get("tipo", "Unknown")
+
+            # Detect message format and extract operation data
+            # New format (v2): tipo and detalle at root level
+            if "tipo" in data and "detalle" in data:
+                operation_type = data.get("tipo", "Unknown")
+                operation_data = data.get("detalle", {})
+                # Add tipo to operation_data for backwards compatibility
+                operation_data["tipo"] = operation_type
+                self.logger.info(f"Processing new format (v2) message: tipo={operation_type}")
+            # Legacy format (v1): nested structure
+            elif "operation_data" in data:
+                operation_data = data.get("operation_data", {}).get("operation", {})
+                operation_type = operation_data.get("tipo", "Unknown")
+                self.logger.info(f"Processing legacy format (v1) message: tipo={operation_type}")
+            else:
+                self.logger.error(f"Unknown message format: {data}")
+                raise ValueError("Unknown message format - missing 'tipo' or 'operation_data'")
+
+            # Route to appropriate handler based on operation type
             if operation_type == "ado220":
                 result = operacion_gastoADO220(operation_data, self.logger)
             elif operation_type == "pmp450":
@@ -79,7 +109,8 @@ class GastoConsumer:
                 result = test_result
             elif operation_type == "ordenarypagar":
                 result = ordenar_y_pagar_operacion_gasto(operation_data)
-            else: #unknow
+            else: # unknown type
+                self.logger.warning(f"Unknown operation type: {operation_type}")
                 result = test_result
 
 
