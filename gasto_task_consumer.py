@@ -21,6 +21,7 @@ class GastoConsumer:
         self.logger = logger
         self.status_callback = None
         self.task_callback = None
+        self.is_connected = False  # Track connection state
         self.setup_connection()
 
     def setup_connection(self):
@@ -49,12 +50,16 @@ class GastoConsumer:
             self.channel.basic_qos(prefetch_count=1)
             self.logger.info("RabbitMQ connection established successfully")
 
-            # Notify callback of connection
+            # Track connection state
+            self.is_connected = True
+
+            # Notify callback of connection (if already set)
             if self.status_callback:
                 self.status_callback('connected')
 
         except Exception as e:
             self.logger.error(f"Failed to connect to RabbitMQ: {e}")
+            self.is_connected = False
             if self.status_callback:
                 self.status_callback('disconnected')
             raise
@@ -250,6 +255,9 @@ class GastoConsumer:
                 self.connection.close()
             self.logger.info("Successfully shut down consumer")
 
+            # Update connection state
+            self.is_connected = False
+
             # Notify GUI of disconnection
             if self.status_callback:
                 self.status_callback('disconnected')
@@ -260,6 +268,10 @@ class GastoConsumer:
     def set_status_callback(self, callback):
         """Set the status callback function for GUI updates."""
         self.status_callback = callback
+
+        # Emit current connection state when callback is first registered
+        if callback and self.is_connected:
+            callback('connected')
 
     def set_task_callback(self, callback):
         """Set the task callback function for detailed progress updates."""
