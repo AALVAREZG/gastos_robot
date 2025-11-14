@@ -1,0 +1,7 @@
+# RabbitMQ Configuration
+# Copy this file to config.py and fill in your actual values
+
+RABBITMQ_HOST = 'localhost'
+RABBITMQ_PORT = 5672
+RABBITMQ_USER = 'guest'
+RABBITMQ_PASS = 'guest'
