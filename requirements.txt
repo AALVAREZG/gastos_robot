@@ -1,0 +1,37 @@
+# SICAL Gastos Robot - Python Dependencies
+# Python version: 3.10.12 or higher
+
+# RPA Framework and Robocorp
+# Core framework for robotic process automation
+rpaframework==30.0.2
+
+# Robocorp core library
+robocorp==3.0.0
+
+# Robocorp browser automation
+robocorp-browser==2.3.5
+
+# Robocorp Windows UI automation
+# Required for SICAL desktop application interaction
+robocorp-windows==1.0.4
+
+# Robocorp trust store
+robocorp-truststore==0.8.0
+
+# RabbitMQ client
+# Message queue communication
+pika==1.3.2
+
+# Optional dependencies
+# Uncomment or install separately if needed
+
+# Excel export functionality (used in task_history_db.py)
+# openpyxl>=3.0.0
+
+# Note: The following are part of Python standard library
+# and do not need to be installed:
+# - tkinter (GUI framework - included with Python on Windows)
+# - sqlite3 (Database - included with Python)
+# - json, csv, os, sys, time, datetime, logging
+# - threading, dataclasses, enum, collections
+# - pathlib, typing, ctypes
