@@ -4,6 +4,8 @@ import pika
 import json
 import dataclasses
 import logging
+import time
+from datetime import datetime
 from typing import Optional
 from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from gasto_tasks import OperationEncoder, operacion_gastoADO220, OperationStatus, OperationResult
@@ -68,7 +70,7 @@ class GastoConsumer:
             "detalle": {...operation-specific fields...}
         }
         """
-        self.logger.critical(f"Received message with correlation_id: {properties.correlation_id}")
+        self.logger.info(f"Received message with correlation_id: {properties.correlation_id}")
 
         try:
             # Parse the incoming message
@@ -99,19 +101,35 @@ class GastoConsumer:
                 raise ValueError("Invalid message format - must contain either 'operation_data.operation' or 'tipo' and 'detalle' fields")
 
             # Notify GUI of task started with details
+            # Map fields from the actual message format
+            # Calculate total amount from aplicaciones if not present
+            aplicaciones = operation_data.get('aplicaciones', [])
+            total_amount = sum(float(app.get('importe', 0)) for app in aplicaciones) if aplicaciones else None
+
+            # Build description from texto_sical if available
+            texto_sical_list = operation_data.get('texto_sical', [])
+            description = texto_sical_list[0].get('texto_ado', '') if texto_sical_list else None
+
+            # Track task details and start time for completion callback
+            started_at = datetime.now().isoformat()
+            start_time = time.time()
+
+            task_details = {
+                'task_id': task_id,
+                'operation_type': operation_type,
+                'operation_number': operation_data.get('num_operacion'),  # Will be None initially, set after validation
+                'amount': total_amount,
+                'date': operation_data.get('fecha'),  # Changed from fecha_op
+                'cash_register': operation_data.get('caja'),
+                'third_party': operation_data.get('tercero'),
+                'nature': operation_data.get('naturaleza'),  # May be None for some operations
+                'description': description,
+                'total_line_items': len(aplicaciones),
+                'started_at': started_at
+            }
+
             if self.status_callback:
-                self.status_callback('task_started',
-                    task_id=task_id,
-                    operation_type=operation_type,
-                    operation_number=operation_data.get('num_operacion'),
-                    amount=operation_data.get('total_op'),
-                    date=operation_data.get('fecha_op'),
-                    cash_register=operation_data.get('caja'),
-                    third_party=operation_data.get('tercero'),
-                    nature=operation_data.get('naturaleza'),
-                    description=operation_data.get('descripcion'),
-                    total_line_items=len(operation_data.get('aplicaciones', []))
-                )
+                self.status_callback('task_started', **task_details)
 
             test_result = OperationResult (
                 status = OperationStatus.PENDING,
@@ -138,7 +156,7 @@ class GastoConsumer:
 
 
 
-            self.logger.critical(f"FINALIZADO: RESULTADO OPERACIÓN GASTO.......: {result}")
+            self.logger.info(f"Operation completed: {operation_type} - Status: {result.status.value}, Error: {result.error if result.error else 'None'}")
             # Prepare response
             response = {
                 'status': result.status.value,
@@ -161,20 +179,42 @@ class GastoConsumer:
             ch.basic_ack(delivery_tag=method.delivery_tag)
             self.logger.info(f"Successfully processed message {properties.correlation_id}")
 
-            # Notify GUI of task completion
+            # Notify GUI of task completion with full details
             if self.status_callback:
+                # Calculate duration
+                duration_seconds = time.time() - start_time
+
+                # Update task_details with completion info
+                completion_details = task_details.copy()
+                completion_details['duration_seconds'] = duration_seconds
+                completion_details['error_message'] = result.error if result.error else None
+
+                # Update operation_number if it was set during processing
+                if result.num_operacion:
+                    completion_details['operation_number'] = result.num_operacion
+
                 success = result.status in (OperationStatus.COMPLETED, OperationStatus.IN_PROGRESS)
                 if success:
-                    self.status_callback('task_completed', task_id=task_id)
+                    self.status_callback('task_completed', **completion_details)
                 else:
-                    self.status_callback('task_failed', task_id=task_id)
+                    self.status_callback('task_failed', **completion_details)
 
         except Exception as e:
             self.logger.exception(f"Error processing message: {e}")
 
-            # Notify GUI of task failure
+            # Notify GUI of task failure with details if available
             if self.status_callback:
-                self.status_callback('task_failed', task_id=properties.correlation_id, error_message=str(e))
+                # Use task_details if defined, otherwise create minimal details
+                if 'task_details' in locals() and 'start_time' in locals():
+                    failure_details = task_details.copy()
+                    failure_details['duration_seconds'] = time.time() - start_time
+                    failure_details['error_message'] = str(e)
+                    self.status_callback('task_failed', **failure_details)
+                else:
+                    # Minimal details if task_details not yet created
+                    self.status_callback('task_failed',
+                                       task_id=properties.correlation_id,
+                                       error_message=str(e))
 
             # Negative acknowledgment - message will be requeued
             ch.basic_nack(delivery_tag=method.delivery_tag)
@@ -182,7 +222,7 @@ class GastoConsumer:
     def start_consuming(self):
         """Start consuming messages from the queue"""
         try:
-            self.logger.critical(f"Starting to consume messages from {self.queue_name}")
+            self.logger.info(f"Starting to consume messages from {self.queue_name}")
             
             # Register the callback function to be called when messages arrive
             self.channel.basic_consume(
