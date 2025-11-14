@@ -682,14 +682,16 @@ class GastosGUI:
             task_id = kwargs.get('task_id', 'unknown')
             status_manager.task_completed(task_id, success=True)
 
-            # Save to history database
-            self.save_task_to_history(task_id, 'completed', **kwargs)
+            # Save to history database - remove task_id from kwargs to avoid duplication
+            history_kwargs = {k: v for k, v in kwargs.items() if k != 'task_id'}
+            self.save_task_to_history(task_id, 'completed', **history_kwargs)
         elif event == 'task_failed':
             task_id = kwargs.get('task_id', 'unknown')
             status_manager.task_completed(task_id, success=False)
 
-            # Save to history database
-            self.save_task_to_history(task_id, 'failed', **kwargs)
+            # Save to history database - remove task_id from kwargs to avoid duplication
+            history_kwargs = {k: v for k, v in kwargs.items() if k != 'task_id'}
+            self.save_task_to_history(task_id, 'failed', **history_kwargs)
 
     def task_callback(self, event: str, **kwargs):
         """

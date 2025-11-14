@@ -80,9 +80,23 @@ class GastoConsumer:
             if self.status_callback:
                 self.status_callback('task_received', task_id=task_id)
 
-            # Accessing nested values safely
-            operation_data = data.get("operation_data", {}).get("operation", {})
-            operation_type = data.get("operation_data", {}).get("operation", {}).get("tipo", "Unknown")
+            # Extract operation data from the message
+            # Support both wrapped format (with operation_data.operation) and direct format
+            if "operation_data" in data and "operation" in data.get("operation_data", {}):
+                # New wrapped format from producer
+                self.logger.info("Processing wrapped message format (operation_data.operation)")
+                operation_wrapper = data.get("operation_data", {}).get("operation", {})
+                operation_type = operation_wrapper.get("tipo", "Unknown")
+                operation_data = operation_wrapper.get("detalle", {})
+            elif "tipo" in data and "detalle" in data:
+                # Direct v2 format
+                self.logger.info("Processing direct v2 message format (tipo/detalle)")
+                operation_type = data.get("tipo")
+                operation_data = data.get("detalle", {})
+            else:
+                # Invalid format
+                self.logger.error(f"Invalid message format: {data}")
+                raise ValueError("Invalid message format - must contain either 'operation_data.operation' or 'tipo' and 'detalle' fields")
 
             # Notify GUI of task started with details
             if self.status_callback:
@@ -104,15 +118,6 @@ class GastoConsumer:
                 init_time= None,
                 sical_is_open=False
             )
-
-            # Process the gasto operation based on type
-            # Extract operation type and data from v2 format
-            if "tipo" not in data or "detalle" not in data:
-                self.logger.error(f"Invalid message format: {data}")
-                raise ValueError("Invalid message format - must contain 'tipo' and 'detalle' fields")
-
-            operation_type = data.get("tipo")
-            operation_data = data.get("detalle", {})
 
             # Add tipo to operation_data for handler functions
             operation_data["tipo"] = operation_type
