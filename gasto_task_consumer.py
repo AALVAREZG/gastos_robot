@@ -17,6 +17,8 @@ class GastoConsumer:
         self.channel: Optional[pika.channel.Channel] = None
         self.queue_name = 'sical_queue.gasto'
         self.logger = logger
+        self.status_callback = None
+        self.task_callback = None
         self.setup_connection()
 
     def setup_connection(self):
@@ -44,9 +46,15 @@ class GastoConsumer:
             # Set QoS to handle one message at a time
             self.channel.basic_qos(prefetch_count=1)
             self.logger.info("RabbitMQ connection established successfully")
-            
+
+            # Notify callback of connection
+            if self.status_callback:
+                self.status_callback('connected')
+
         except Exception as e:
             self.logger.error(f"Failed to connect to RabbitMQ: {e}")
+            if self.status_callback:
+                self.status_callback('disconnected')
             raise
 
     def callback(self, ch, method, properties, body):
@@ -55,23 +63,43 @@ class GastoConsumer:
         This is called automatically by pika for each message received.
         """
         self.logger.critical(f"Received message with correlation_id: {properties.correlation_id}")
-        
+
         try:
             # Parse the incoming message
             data = json.loads(body)
             self.logger.info(f"Message content: {data}")
-            # Process the arqueo operation
 
-            #result = operacion_arqueo(data['operation_data']['operation'])
-            
+            # Notify GUI of task received
+            task_id = data.get('task_id', properties.correlation_id)
+            if self.status_callback:
+                self.status_callback('task_received', task_id=task_id)
+
+            # Accessing nested values safely
+            operation_data = data.get("operation_data", {}).get("operation", {})
+            operation_type = data.get("operation_data", {}).get("operation", {}).get("tipo", "Unknown")
+
+            # Notify GUI of task started with details
+            if self.status_callback:
+                self.status_callback('task_started',
+                    task_id=task_id,
+                    operation_type=operation_type,
+                    operation_number=operation_data.get('num_operacion'),
+                    amount=operation_data.get('total_op'),
+                    date=operation_data.get('fecha_op'),
+                    cash_register=operation_data.get('caja'),
+                    third_party=operation_data.get('tercero'),
+                    nature=operation_data.get('naturaleza'),
+                    description=operation_data.get('descripcion'),
+                    total_line_items=len(operation_data.get('aplicaciones', []))
+                )
+
             test_result = OperationResult (
                 status = OperationStatus.PENDING,
                 init_time= None,
                 sical_is_open=False
             )
-            # Accessing nested values safely
-            operation_data = data.get("operation_data", {}).get("operation", {})
-            operation_type = data.get("operation_data", {}).get("operation", {}).get("tipo", "Unknown")
+
+            # Process the gasto operation based on type
             if operation_type == "ado220":
                 result = operacion_gastoADO220(operation_data, self.logger)
             elif operation_type == "pmp450":
@@ -106,9 +134,22 @@ class GastoConsumer:
             # Acknowledge the message was processed successfully
             ch.basic_ack(delivery_tag=method.delivery_tag)
             self.logger.info(f"Successfully processed message {properties.correlation_id}")
-            
+
+            # Notify GUI of task completion
+            if self.status_callback:
+                success = result.status in (OperationStatus.COMPLETED, OperationStatus.IN_PROGRESS)
+                if success:
+                    self.status_callback('task_completed', task_id=task_id)
+                else:
+                    self.status_callback('task_failed', task_id=task_id)
+
         except Exception as e:
             self.logger.exception(f"Error processing message: {e}")
+
+            # Notify GUI of task failure
+            if self.status_callback:
+                self.status_callback('task_failed', task_id=properties.correlation_id, error_message=str(e))
+
             # Negative acknowledgment - message will be requeued
             ch.basic_nack(delivery_tag=method.delivery_tag)
 
@@ -142,5 +183,18 @@ class GastoConsumer:
             if self.connection and not self.connection.is_closed:
                 self.connection.close()
             self.logger.info("Successfully shut down consumer")
+
+            # Notify GUI of disconnection
+            if self.status_callback:
+                self.status_callback('disconnected')
+
         except Exception as e:
             self.logger.error(f"Error while shutting down: {e}")
+
+    def set_status_callback(self, callback):
+        """Set the status callback function for GUI updates."""
+        self.status_callback = callback
+
+    def set_task_callback(self, callback):
+        """Set the task callback function for detailed progress updates."""
+        self.task_callback = callback
