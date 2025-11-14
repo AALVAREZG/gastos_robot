@@ -352,35 +352,51 @@ def handle_error_cleanup(ventana_proceso=None):
 
 
 def create_ado_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Transform operation data from message into SICAL-compatible format"""
-    datos_220ADO_PLANTILLA_NOUSADO =  {
-        'fecha':'23042024', 'expediente':'rbt-apunte-ADO', 'tercero' :'A28141935',
-        'fpago': '10', 'tpago': '10', 'caja': '200', 
-        'texto':'RECIBO POLIZA 0960270022271 23042024 - 23072024 RESP. CIVIL', 
-        'aplicaciones': [{'funcional':'920', 'economica':'224', 'gfa':None, 'importe':'1745.06', 'cuenta':'625'},]
-        }
-    
-    texto_operacion = str(operation_data.get('texto', 'ADO....'))
-    
-    ## TEMPORALMENTE, USAMOS ESTE TRUCO PARA FINALIZAR OPERACIÓN
-    ## COMPROBAMOS SI EL TEXTO DE LA OPERACIÓN ACABA EN _FIN
+    """
+    Transform operation data from v2 message format into SICAL-compatible format.
 
+    Args:
+        operation_data: Operation data from RabbitMQ message (v2 format)
+
+    Returns:
+        Transformed data compatible with SICAL processing functions
+    """
+    # Extract texto field from texto_sical array
+    texto_sical = operation_data.get('texto_sical', [])
+    if texto_sical and len(texto_sical) > 0:
+        texto_operacion = str(texto_sical[0].get('texto_ado', 'ADO....'))
+    else:
+        texto_operacion = 'ADO....'
+
+    # Check if operation should be finalized (validated, printed, and paid)
+    # Text ending with _FIN triggers complete operation flow
     if texto_operacion.endswith('_FIN'):
         finalizar_operacion = True
         texto_operacion = texto_operacion.rstrip('_FIN')
     else:
         finalizar_operacion = False
 
+    # Convert fecha from DD/MM/YYYY to DDMMYYYY format required by SICAL
+    fecha = operation_data.get('fecha', '').replace('/', '')
+
+    # Extract caja code from "200_CAIXABNK - 2064" format -> "200"
+    caja_raw = operation_data.get('caja', '200')
+    caja = caja_raw.split('_')[0] if '_' in caja_raw else caja_raw
+
     return {
-        'fecha': operation_data.get('fecha'),
+        'fecha': fecha,
         'expediente': operation_data.get('expediente', 'rbt-apunte-ADO'),
         'tercero': operation_data.get('tercero'),
         'fpago': operation_data.get('fpago', '10'),
         'tpago': operation_data.get('tpago', '10'),
-        'caja': operation_data.get('caja'),
+        'caja': caja,
+        'caja_tercero': operation_data.get('caja_tercero'),
         'texto': texto_operacion,
         'aplicaciones': create_aplicaciones(operation_data.get('aplicaciones', [])),
-        'finalizar_operacion': finalizar_operacion
+        'finalizar_operacion': finalizar_operacion,
+        'descuentos': operation_data.get('descuentos', []),
+        'aux_data': operation_data.get('aux_data', {}),
+        'metadata': operation_data.get('metadata', {})
     }
 
 def clean_value(value):
@@ -400,17 +416,45 @@ def clean_value(value):
 
 
 def create_aplicaciones(final_data: list) -> list:
-    """Transform aplicaciones data into SICAL-compatible format"""
+    """
+    Transform aplicaciones data from v2 message format into SICAL-compatible format.
+
+    Args:
+        final_data: List of aplicacion objects from message (v2 format)
+
+    Returns:
+        List of aplicaciones in SICAL-compatible format
+    """
     aplicaciones = []
-    for aplicacion in final_data:  # Exclude last item (total)
-        aplicaciones.append({
+    for aplicacion in final_data:
+        # Get economica code
+        economica = str(aplicacion['economica'])
+
+        # Prefer cuenta_pgp from message, fallback to mapping table
+        if 'cuenta_pgp' in aplicacion and aplicacion['cuenta_pgp']:
+            cuenta = str(aplicacion['cuenta_pgp'])
+        else:
+            cuenta = partidas_gasto_cuentaPG.get(economica, '000')
+
+        # Convert importe to string (v2 sends as float)
+        importe = str(aplicacion['importe'])
+
+        aplicacion_obj = {
             'funcional': str(aplicacion['funcional']),
-            'economica': str(aplicacion['economica']),
-            'gfa': aplicacion.get('gfa', None),
-            'importe': str(aplicacion['importe']),
-            'cuenta': partidas_gasto_cuentaPG.get(str(aplicacion['economica']), '000'),
+            'economica': economica,
+            'gfa': aplicacion.get('proyecto'),  # v2 uses 'proyecto' field
+            'importe': importe,
+            'cuenta': cuenta,
             'otro': False,
-        })
+            'year': str(aplicacion.get('year', '')),
+            'contraido': bool(aplicacion.get('contraido', False)),
+            'base_imponible': float(aplicacion.get('base_imponible', 0.0)),
+            'tipo': float(aplicacion.get('tipo', 0.0)),
+            'aux': str(aplicacion.get('aux', ''))
+        }
+
+        aplicaciones.append(aplicacion_obj)
+
     return aplicaciones
 
 

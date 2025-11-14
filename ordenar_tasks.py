@@ -144,15 +144,28 @@ def ordenarypagar_gasto(operation_data: Dict[str, Any]) -> OperationResult:
     return result
 
 def create_pago_data(operation_data: Dict[str, Any]) -> Dict[str, Any]:
-    """Transform operation data from message into SICAL-compatible format"""
-    """If not fecha_pago, same date as fecha_ordenamiento"""
-    fecha_orden = operation_data.get('fecha_ordenamiento', operation_data.get('fecha'))
+    """
+    Transform operation data from v2 message format into SICAL-compatible format.
+    If not fecha_pago, same date as fecha_ordenamiento.
+
+    Args:
+        operation_data: Operation data from RabbitMQ message (v2 format)
+
+    Returns:
+        Transformed payment data compatible with SICAL processing functions
+    """
+    # Convert dates from DD/MM/YYYY to DDMMYYYY format required by SICAL
+    fecha_orden = operation_data.get('fecha_ordenamiento', operation_data.get('fecha', ''))
+    fecha_orden = fecha_orden.replace('/', '') if fecha_orden else ''
+
+    fecha_pago = operation_data.get('fecha_pago', fecha_orden)
+    fecha_pago = fecha_pago.replace('/', '') if fecha_pago else fecha_orden
+
     return {
         'num_operacion': operation_data.get('num_operacion'),
         'num_lista': operation_data.get('num_lista', None),
         'fecha_ordenamiento': fecha_orden,
-        'fecha_pago': operation_data.get('fecha_pago', fecha_orden),
-        
+        'fecha_pago': fecha_pago,
     }
 
 def setup_sical_window(window_manager: TesoreriaPagosSicalWindowManager) -> bool:
