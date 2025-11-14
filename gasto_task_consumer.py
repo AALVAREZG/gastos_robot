@@ -61,6 +61,12 @@ class GastoConsumer:
         """
         Process incoming messages from RabbitMQ.
         This is called automatically by pika for each message received.
+
+        Message format (v2):
+        {
+            "tipo": "ado220|pmp450|ordenarypagar",
+            "detalle": {...operation-specific fields...}
+        }
         """
         self.logger.critical(f"Received message with correlation_id: {properties.correlation_id}")
 
@@ -100,6 +106,20 @@ class GastoConsumer:
             )
 
             # Process the gasto operation based on type
+            # Extract operation type and data from v2 format
+            if "tipo" not in data or "detalle" not in data:
+                self.logger.error(f"Invalid message format: {data}")
+                raise ValueError("Invalid message format - must contain 'tipo' and 'detalle' fields")
+
+            operation_type = data.get("tipo")
+            operation_data = data.get("detalle", {})
+
+            # Add tipo to operation_data for handler functions
+            operation_data["tipo"] = operation_type
+
+            self.logger.info(f"Processing message: tipo={operation_type}")
+
+            # Route to appropriate handler based on operation type
             if operation_type == "ado220":
                 result = operacion_gastoADO220(operation_data, self.logger)
             elif operation_type == "pmp450":
@@ -107,7 +127,8 @@ class GastoConsumer:
                 result = test_result
             elif operation_type == "ordenarypagar":
                 result = ordenar_y_pagar_operacion_gasto(operation_data)
-            else: #unknow
+            else: # unknown type
+                self.logger.warning(f"Unknown operation type: {operation_type}")
                 result = test_result
 
 
