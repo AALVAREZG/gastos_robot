@@ -167,7 +167,7 @@ def setup_consulta_op_window(window_manager: ConsultaOpSicalWindowManager, logge
         #DEVUELVE FALSE SOLO SI FMENUSICAL ESTA CERRADO
         time.sleep(3)
         if not abrir_ventana_opcion_en_menu(rama_consulta_operaciones, logger):
-            logger.critical(f"Imposible abrir ventana: {rama_consulta_operaciones}")
+            logger.error(f"Unable to open window: {rama_consulta_operaciones} - Check if SICAL is open")
             return False
         
     # ESPERAMOS UN POCO A QUE SE ABRA LA VENTANA CONSULTA
@@ -187,8 +187,8 @@ def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> Opera
     Returns:
         OperationResult: Object containing the operation results and status
     """
-    gasto_logger.critical('||||||||||||||||||  --1--  ||||||||||||||')
-    gasto_logger.critical(f'Entry Operación gasto: {operation_data}')
+    gasto_logger.info('=' * 60)
+    gasto_logger.info(f'Starting ADO operation - Tercero: {operation_data.get("tercero")}, Caja: {operation_data.get("caja")}, Fecha: {operation_data.get("fecha")}')
     init_time = datetime.now()
     result = OperationResult(
         status=OperationStatus.PENDING,
@@ -204,11 +204,10 @@ def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> Opera
     # Prepare operation data
     try:
         datos_ado = create_ado_data(operation_data)
-        gasto_logger.critical('||||||||||||||||||  --2--  ||||||||||||||')
-        gasto_logger.critical(f'Created ADO data: {datos_ado}')
+        gasto_logger.info(f'ADO data prepared - Amount: {datos_ado.get("aplicaciones", [{}])[0].get("importe", "N/A") if datos_ado.get("aplicaciones") else "N/A"}, Lines: {len(datos_ado.get("aplicaciones", []))}')
         result.completed_phases.append({'0':'Created ADO data'})
     except Exception as e:
-        gasto_logger.critical(f'Exception creating ado data {e}')
+        gasto_logger.error(f'Exception creating ado data: {e}')
         result.status = OperationStatus.COMPLETED
 
     finalizar_operacion = datos_ado.get('finalizar_operacion', False)
@@ -230,21 +229,21 @@ def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> Opera
             if result.status == OperationStatus.FAILED:
                 return result
             elif result.status == OperationStatus.P_DUPLICATED:
-                txt_message = f"Posiblidad de operacion duplicada, registros simimares: {result.similiar_records_encountered}"
-                gasto_logger.critical(txt_message)
+                txt_message = f"Possible duplicate operation found, similar records: {result.similiar_records_encountered}"
+                gasto_logger.warning(txt_message)
                 show_windows_message_box(txt_message=txt_message, txt_title="Proceso abortado")
                 return result
             elif result.status == OperationStatus.IN_PROGRESS:
                 pass
             else:
-                gasto_logger.critical(f"Estado desconocido tras consultar operación {result}")
+                gasto_logger.warning(f"Unknown status after operation query: {result}")
 
-            
+
         except Exception as e:
-            gasto_logger.critical(f'Exception consulting ado operation previous data {e}')
+            gasto_logger.error(f'Exception consulting ado operation previous data: {e}')
             return result
     else:
-        gasto_logger.critical("NO FINALIZAR OPERACION")
+        gasto_logger.info("Operation will not be finalized (manual mode)")
         pass
                 
     
@@ -263,17 +262,17 @@ def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> Opera
         # Process operation
         result = process_ado220_operation(window_manager.ventana_proceso, datos_ado, result)
         finalizar_operacion = datos_ado.get('finalizar_operacion', False)
-        gasto_logger.critical(f"result of input data on ado220 {result}")
-        gasto_logger.info(f"finalizar operacion :? {finalizar_operacion}")  # Fixed
+        gasto_logger.info(f"Operation data entered successfully - Status: {result.status.value}")
+        gasto_logger.info(f"Will finalize operation: {finalizar_operacion}")
         if result.status == OperationStatus.COMPLETED and finalizar_operacion:
             # PEDIR CONFIRMACIÓN ANTES DE VALIDAR
             # FLAG PARA EVITAR DUPLICAR REGISTROS
             red_flag = result.similiar_records_encountered > 0
-            if not red_flag: 
+            if not red_flag:
                 result = validar_operacion_ADO(window_manager.ventana_proceso, result)
                 num_operacion = result.num_operacion
-                gasto_logger.critical(f"result of validar operacion {result}")
-                gasto_logger.critical(f"numero operacion :? {num_operacion}")
+                gasto_logger.info(f"Operation validated - Status: {result.status.value}")
+                gasto_logger.info(f"Operation number assigned: {num_operacion}")
                 
                 if result.status == OperationStatus.COMPLETED and num_operacion:
                     #handle_error_cleanup()  # Fixed - removed parameter
@@ -315,17 +314,17 @@ def operacion_gastoADO220(operation_data: Dict[str, Any], gasto_logger) -> Opera
         
         
     except Exception as e:
-        gasto_logger.critical(f"Error in GASTO operation {e}")
+        gasto_logger.error(f"Error in GASTO operation: {e}")
         result.status = OperationStatus.FAILED
         result.error = str(e)
-        
+
         if result.sical_is_open:
             handle_error_cleanup()  # Fixed - removed parameter
-    
+
     finally:
         # Cleanup
-        gasto_logger.critical(f"FINALIZAR OPERACION?? {datos_ado.get('finalizar_operacion', 'n/d')}")
-        gasto_logger.critical(result)  # Fixed typo
+        gasto_logger.info(f"Operation finalization: {datos_ado.get('finalizar_operacion', 'n/d')}")
+        gasto_logger.info(f"Final result - Status: {result.status.value}, Op #: {result.num_operacion}, Error: {result.error if result.error else 'None'}")
         #window_manager.close_window()
         
         # Calculate duration
@@ -669,11 +668,11 @@ def fill_main_panel_data(ventana_proceso, datos_ado: Dict[str, Any], result: Ope
 def validar_operacion_ADO(ventana_proceso, result):
     result.status = OperationStatus.PENDING
     try:
-        robocorp_logger.critical(f"Try to validate ADO in ...{ventana_proceso} ")
+        robocorp_logger.info(f"Validating ADO operation in window: {ventana_proceso}")
         ventana_proceso.find('name:"Validar" and path:"2|5"').click(wait_time=0.2)
     except Exception as inst:
-        robocorp_logger.critical("Exception al validar la operacion ... ")
-        robocorp_logger.exception("Exception al validar la operacion ... ")
+        robocorp_logger.error("Exception while validating operation")
+        robocorp_logger.exception("Exception while validating operation")
         robocorp_logger.exception(type(inst))    # the exception type
     else:
         modal_confirm = windows.find_window('regex:.*Confirm')
@@ -875,16 +874,16 @@ def setup_tesoreria_pago_window(window_manager: TesoreriaPagosSicalWindowManager
     if not abrir_ventana_opcion_en_menu(rama_tesoreria_pagos, logger):
         return False
     window_manager.ventana_proceso = window_manager.find_proceso_window()
-    window_manager.logger.critical(f"VENTANA proceso {window_manager.ventana_proceso}")
+    window_manager.logger.debug(f"Tesoreria window: {window_manager.ventana_proceso}")
     return bool(window_manager.ventana_proceso)
 
 
-def ordenar_y_pagar_operacion_gasto(ventana_proceso, datos_pago: Dict[str, Any], 
+def ordenar_y_pagar_operacion_gasto(ventana_proceso, datos_pago: Dict[str, Any],
                            result: OperationResult) -> OperationResult:
     logger = robocorp_logger
-    logger.info('||||||||||||||||||  --5--  ||||||||||||||')
-    logger.critical(f'Trying to order and pay .... {datos_pago}')
-    logger.critical(f'With window manager .... {ventana_proceso}')
+    logger.info('Starting payment order process')
+    logger.info(f'Payment data - Op #: {datos_pago.get("num_operacion")}, Order date: {datos_pago.get("fecha_ordenpago")}')
+    logger.debug(f'Window manager: {ventana_proceso}')
     try:
         fecha_ordenpago_el = ventana_proceso.find('class:"TMaskEdit" and path:"2|1|1"')
         fecha_ordenpago_el.send_keys(datos_pago['fecha_ordenamiento'], interval=0.1, wait_time=0.5, send_enter=True)
@@ -1036,7 +1035,7 @@ def consultar_operacion_en_SICAL(ventana_proceso, datos_ado: Dict[str, Any], res
            
         else:
             result.similiar_records_encountered = 0
-            logger.critical("No existen registros similares")
+            logger.info("No similar records found - proceeding with operation")
             click_ok_button = ventana_filtros_op.find('class:"TButton" and name:"OK"').click()
             close_filtros = ventana_filtros_op.find('control:"ButtonControl" and name:"Cerrar"').click()
             # No cerramos la ventana consulta, luego la necesitamos para imprimir y nos ahorramos abrirla
