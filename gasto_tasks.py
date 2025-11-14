@@ -510,7 +510,7 @@ def abrir_ventana_opcion_en_menu(menu_a_buscar, logger):
 
     app = windows.find_window('regex:.*FMenuSical', raise_error=False)
     if not app:
-        logger.error('¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡', 'SICAL CLOSED?????')
+        logger.error('SICAL application not found - Please ensure SICAL is open')
         return False
 
     if not menu_a_buscar:
