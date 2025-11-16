@@ -20,3 +20,6 @@ utils.py
 config.py
 OLD/
 output/
+
+# Task history database
+gastos_task_history.db
