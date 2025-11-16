@@ -10,7 +10,7 @@ from enum import Enum
 import logging
 from robocorp import windows
 from robocorp.tasks import task
-from gasto_tasks import OperationEncoder, OperationResult, OperationStatus
+from sical_base import OperationEncoder, OperationResult, OperationStatus
 
 ###########
 ### ORDENAR Y PAGAR
