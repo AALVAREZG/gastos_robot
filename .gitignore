@@ -15,6 +15,7 @@ temp/
 testrun/*
 .~lock*
 *.pkl
+*.bak
 utils.py
 config.py
 OLD/
