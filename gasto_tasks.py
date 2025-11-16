@@ -9,24 +9,9 @@ from dataclasses import dataclass, field
 from enum import Enum
 import logging
 import ctypes
+from mapp_partidas_cuenta_example import partidas_gasto_cuentaPG
 
 
-
-###########
-### GASTO 1.5
-## se pretende hacer uso de rabbitMq para la comunicación entre los procesos
-###########
-
-partidas_gasto_cuentaPG = {
-    '224' : '625',      #920 -224 PRIMAS DE SEGUROS
-    '16205' : '644',    #GASTOS SOCIALES. SEGUROS
-    '311'   : '669',    #932-311 COMISIONES BANCARIAS, GASTOS
-    '241'   : '629',    #241-629 GASTOS DIVERSOS, 629 COMUNICACIONES Y OTROS GASTOS
-    '467'   : '6501',   #162-467 Transferencias a consorcios.
-    '20104' : '561', #FIANZA OBRAS
-    '30012' : '554', #INGRESOS CTAS OP PEND APLICACION
-    '30016' : '554', #INGRESOS AGENTES RECAUDADORES PEND APLICACION
-}
 
 ROBOT_DIR = Path(__file__).parent.absolute()
 DATA_FOLDER_NAME = 'data'
