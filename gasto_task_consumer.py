@@ -11,6 +11,7 @@ import json
 import dataclasses
 import logging
 import time
+import comtypes
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
@@ -378,6 +379,15 @@ class GastoConsumer:
     def start_consuming(self) -> None:
         """Start consuming messages from the queue."""
         try:
+            # Initialize COM for this thread
+            # This ensures COM stays initialized across all task executions
+            # and avoids COM state issues between successive tasks
+            try:
+                comtypes.CoInitialize()
+                self.logger.info('COM initialized for consumer thread')
+            except Exception as e:
+                self.logger.warning(f'COM initialization warning (may already be initialized): {e}')
+
             self.logger.info(f'Starting to consume messages from {self.queue_name}')
 
             # Register callback
@@ -396,6 +406,13 @@ class GastoConsumer:
             self.logger.error(f'Error while consuming messages: {e}')
             self.stop_consuming()
             raise
+        finally:
+            # Uninitialize COM for this thread
+            try:
+                comtypes.CoUninitialize()
+                self.logger.info('COM uninitialized for consumer thread')
+            except Exception as e:
+                self.logger.warning(f'Error uninitializing COM: {e}')
 
     def stop_consuming(self) -> None:
         """Stop consuming messages and close connections."""

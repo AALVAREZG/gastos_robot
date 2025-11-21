@@ -9,6 +9,7 @@ robocorp==2.1.2
 #robocorp-browser==2.3.4
 robocorp-windows==1.0.4 # requires python<=3.11
 #robocorp-truststore==0.8.0
+comtypes # COM initialization for Windows UI automation
 
 # Testing dependences
 pytest==7.4.3
