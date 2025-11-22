@@ -61,6 +61,12 @@ class OperationResult:
     sical_is_open: bool = False
     completed_phases: Optional[list] = field(default_factory=list)
     similiar_records_encountered: int = -1
+    # Duplicate detection details
+    duplicate_details: Optional[list] = field(default_factory=list)
+    duplicate_check_metadata: Optional[dict] = field(default_factory=dict)
+    # Security: Confirmation tokens for force_create
+    duplicate_confirmation_token: Optional[str] = None
+    duplicate_token_expires_at: Optional[float] = None
 
 
 class OperationEncoder(json.JSONEncoder):
@@ -82,6 +88,10 @@ class OperationEncoder(json.JSONEncoder):
                 'sical_is_open': obj.sical_is_open,
                 'completed_phases': obj.completed_phases,
                 'similiar_records_encountered': obj.similiar_records_encountered,
+                'duplicate_details': obj.duplicate_details,
+                'duplicate_check_metadata': obj.duplicate_check_metadata,
+                'duplicate_confirmation_token': obj.duplicate_confirmation_token,
+                'duplicate_token_expires_at': obj.duplicate_token_expires_at,
             }
         return super().default(obj)
 

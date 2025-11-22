@@ -10,6 +10,7 @@ TODO: Configure actual PMP450 paths when SICAL access is available.
 import time
 import logging
 from typing import Any, Dict
+from datetime import datetime
 from robocorp import windows
 
 from sical_base import (
@@ -43,6 +44,11 @@ from sical_utils import (
     show_windows_message_box,
     find_element_with_fallback,
     handle_error_cleanup,
+)
+from sical_security import (
+    get_confirmation_manager,
+    get_rate_limiter,
+    audit_log_force_create,
 )
 
 
@@ -125,6 +131,10 @@ class PMP450Processor(SicalOperationProcessor):
             # Keep original data for payment ordering
             'fecha_ordenamiento': operation_data.get('fecha_ordenamiento', fecha),
             'fecha_pago': operation_data.get('fecha_pago', operation_data.get('fecha_ordenamiento', fecha)),
+            # Security: Duplicate handling policy and token
+            'duplicate_policy': operation_data.get('duplicate_policy', 'abort_on_duplicate'),
+            'duplicate_confirmation_token': operation_data.get('duplicate_confirmation_token'),
+            'duplicate_check_id': operation_data.get('duplicate_check_id'),
         }
 
     def _create_aplicaciones(self, aplicaciones_data: list) -> list:
@@ -206,12 +216,54 @@ class PMP450Processor(SicalOperationProcessor):
                         f'Lines: {len(operation_data.get("aplicaciones", []))}')
 
         finalizar_operacion = operation_data.get('finalizar_operacion', False)
+        duplicate_policy = operation_data.get('duplicate_policy', 'abort_on_duplicate')
 
-        # Phase: Check for duplicate operations (if finalizing)
-        if finalizar_operacion:
-            result = self._check_for_duplicates(operation_data, result)
-            if result.status in (OperationStatus.FAILED, OperationStatus.P_DUPLICATED):
+        # SECURITY: Validate force_create token before processing
+        if duplicate_policy == 'force_create':
+            confirmation_manager = get_confirmation_manager()
+            token_id = operation_data.get('duplicate_confirmation_token')
+
+            is_valid, error_msg = confirmation_manager.validate_token(token_id, operation_data)
+
+            # Audit log the attempt
+            audit_log_force_create(operation_data, is_valid, error_msg)
+
+            if not is_valid:
+                self.logger.error(f'SECURITY: Invalid force_create attempt: {error_msg}')
+                result.status = OperationStatus.FAILED
+                result.error = f'Security validation failed: {error_msg}'
                 return result
+
+            self.logger.info(f'force_create token validated successfully for tercero: {operation_data.get("tercero")}')
+
+        # Phase: Check for duplicate operations (based on policy)
+        if duplicate_policy in ('check_only', 'abort_on_duplicate', 'warn_and_continue'):
+            result = self._check_for_duplicates(operation_data, result)
+
+            if duplicate_policy == 'check_only':
+                # ONLY check, don't create operation
+                if result.status == OperationStatus.P_DUPLICATED:
+                    self.logger.info(f'Check-only mode: Found {result.similiar_records_encountered} duplicates')
+                else:
+                    self.logger.info('Check-only mode: No duplicates found')
+                return result  # Return immediately without creating operation
+
+            elif duplicate_policy == 'abort_on_duplicate':
+                # Current behavior: abort if duplicates found
+                if result.status in (OperationStatus.FAILED, OperationStatus.P_DUPLICATED):
+                    return result
+
+            elif duplicate_policy == 'warn_and_continue':
+                # Log warning but continue creating operation
+                if result.status == OperationStatus.P_DUPLICATED:
+                    self.logger.warning(
+                        f'Duplicates found but continuing due to policy: '
+                        f'{result.similiar_records_encountered} similar records'
+                    )
+                    result.status = OperationStatus.IN_PROGRESS  # Reset status to continue
+
+        # elif duplicate_policy == 'force_create':
+        #     Skip duplicate check entirely - already validated token above
 
         # Phase: Enter operation data
         self.notify_step('Entering operation data into form')
@@ -254,7 +306,15 @@ class PMP450Processor(SicalOperationProcessor):
         """
         Check for duplicate operations using the Consulta window.
 
-        This uses the same logic as ADO220 since the duplicate check mechanism is shared.
+        This method now returns detailed duplicate information and generates
+        confirmation tokens for force_create operations.
+
+        Args:
+            operation_data: Operation data to search for
+            result: Current operation result
+
+        Returns:
+            Updated operation result with duplicate details and token (if duplicates found)
         """
         self.logger.info('Checking for duplicate operations')
         self.notify_step('Checking for duplicate operations')
@@ -263,6 +323,7 @@ class PMP450Processor(SicalOperationProcessor):
         from .ado220_processor import ConsultaWindowManager
 
         consulta_manager = ConsultaWindowManager(self.logger)
+        duplicate_policy = operation_data.get('duplicate_policy', 'abort_on_duplicate')
 
         try:
             # Setup consulta window
@@ -288,11 +349,12 @@ class PMP450Processor(SicalOperationProcessor):
                 result.error = 'Failed to open Filters window'
                 return result
 
-            # Fill filter criteria
-            self._fill_duplicate_check_filters(filtros_window, operation_data)
+            # Fill filter criteria and get search criteria for metadata
+            search_criteria = self._fill_duplicate_check_filters(filtros_window, operation_data)
 
             # Execute search
             filtros_window.find(FILTROS_FORM_PATHS['consultar_button']).click()
+            time.sleep(DEFAULT_TIMING['short_wait'])
 
             # Check for results
             modal_error = filtros_window.find(
@@ -302,17 +364,48 @@ class PMP450Processor(SicalOperationProcessor):
             )
 
             if not modal_error:
-                # Records found - potential duplicate
+                # Records found - potential duplicates
                 num_registros = filtros_window.find(FILTROS_FORM_PATHS['num_registros']).get_value()
-                self.logger.warning(f'Found {num_registros} similar records')
                 result.similiar_records_encountered = int(num_registros) if num_registros else 0
+
+                self.logger.warning(f'Found {num_registros} similar records')
+
+                # TODO: Extract duplicate details from grid
+                # This requires knowledge of the SICAL grid structure
+                result.duplicate_details = []  # Placeholder for detailed extraction
+
+                # Generate confirmation token
+                confirmation_manager = get_confirmation_manager()
+                token_id, expires_at = confirmation_manager.generate_token(operation_data)
+
+                result.duplicate_confirmation_token = token_id
+                result.duplicate_token_expires_at = expires_at
+                result.duplicate_check_metadata = {
+                    'check_id': operation_data.get('duplicate_check_id'),
+                    'check_timestamp': datetime.now().isoformat(),
+                    'search_criteria': search_criteria
+                }
+
                 result.status = OperationStatus.P_DUPLICATED
 
-                txt_message = f'Possible duplicate operation found, similar records: {result.similiar_records_encountered}'
-                show_windows_message_box(txt_message, 'Proceso abortado')
+                # Only show message box if policy is 'abort_on_duplicate'
+                if duplicate_policy == 'abort_on_duplicate':
+                    txt_message = f'Possible duplicate operation found, similar records: {result.similiar_records_encountered}'
+                    show_windows_message_box(txt_message, 'Proceso abortado')
+
+                # Close filtros window
+                filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
+
             else:
                 # No records found - safe to proceed
                 result.similiar_records_encountered = 0
+                result.duplicate_details = []
+                result.duplicate_check_metadata = {
+                    'check_id': operation_data.get('duplicate_check_id'),
+                    'check_timestamp': datetime.now().isoformat(),
+                    'search_criteria': search_criteria
+                }
+
                 self.logger.info('No similar records found - proceeding with operation')
                 filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
@@ -353,10 +446,22 @@ class PMP450Processor(SicalOperationProcessor):
         self,
         filtros_window,
         operation_data: Dict[str, Any]
-    ) -> None:
-        """Fill the filter fields for duplicate checking."""
+    ) -> Dict[str, Any]:
+        """
+        Fill the filter fields for duplicate checking.
+
+        Returns:
+            Dictionary with search criteria used
+        """
         wait_time = DEFAULT_TIMING['short_wait']
         interval = DEFAULT_TIMING['short_wait']
+
+        # Build search criteria dictionary
+        search_criteria = {
+            'tercero': operation_data['tercero'],
+            'fecha': operation_data['fecha'],
+            'caja': operation_data['caja']
+        }
 
         # Tercero
         tercero_field = filtros_window.find(FILTROS_FORM_PATHS['tercero'])
@@ -376,6 +481,13 @@ class PMP450Processor(SicalOperationProcessor):
         # Aplicacion
         if operation_data.get('aplicaciones'):
             first_app = operation_data['aplicaciones'][0]
+
+            search_criteria.update({
+                'funcional': first_app['funcional'],
+                'economica': first_app['economica'],
+                'importe_min': first_app['importe'],
+                'importe_max': first_app['importe']
+            })
 
             funcional_field = filtros_window.find(FILTROS_FORM_PATHS['funcional'])
             funcional_field.double_click()
@@ -397,6 +509,8 @@ class PMP450Processor(SicalOperationProcessor):
         caja_field = filtros_window.find(FILTROS_FORM_PATHS['caja'])
         caja_field.click()
         caja_field.send_keys(operation_data['caja'], interval=0.01, wait_time=wait_time, send_enter=True)
+
+        return search_criteria
 
     def _enter_operation_data(
         self,
