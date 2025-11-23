@@ -433,7 +433,7 @@ class MultiWindowRateLimiter:
     Supports:
     - Multiple concurrent time windows (e.g., 15/hour AND 30/day)
     - Business hours restrictions
-    - Per-tercero tracking
+    - Global tracking (across all terceros)
     - Secure configuration loading
     """
 
@@ -445,14 +445,14 @@ class MultiWindowRateLimiter:
             config: Rate limit configuration with windows and business hours
         """
         self.config = config
-        self.operations: Dict[str, List[float]] = defaultdict(list)
+        self.operations: List[float] = []  # Global operation tracking
 
         # Log configuration
         window_info = ', '.join([
             f'{w.max_operations} ops per {w.time_window_seconds}s ({w.name})'
             for w in config.windows
         ])
-        logger.info(f'MultiWindowRateLimiter initialized: {window_info}')
+        logger.info(f'MultiWindowRateLimiter initialized (GLOBAL): {window_info}')
 
         if config.business_hours:
             logger.info(
@@ -464,8 +464,10 @@ class MultiWindowRateLimiter:
         """
         Check if operation exceeds any rate limit window or business hours.
 
+        Note: Rate limits are GLOBAL (across all terceros), not per-tercero.
+
         Args:
-            tercero: Third party identifier
+            tercero: Third party identifier (logged for audit purposes only)
 
         Returns:
             Tuple of (allowed, error_message)
@@ -480,36 +482,37 @@ class MultiWindowRateLimiter:
 
         # Clean old operations for all windows
         max_window = max(w.time_window_seconds for w in self.config.windows)
-        self.operations[tercero] = [
-            ts for ts in self.operations[tercero]
+        self.operations = [
+            ts for ts in self.operations
             if now - ts < max_window
         ]
 
-        # Check each window
+        # Check each window (globally)
         for window in self.config.windows:
             recent_ops = [
-                ts for ts in self.operations[tercero]
+                ts for ts in self.operations
                 if now - ts < window.time_window_seconds
             ]
 
             if len(recent_ops) >= window.max_operations:
                 logger.warning(
-                    f'RATE LIMIT: Tercero {tercero} exceeded {window.name} limit: '
+                    f'RATE LIMIT (GLOBAL): {window.name} limit exceeded: '
                     f'{len(recent_ops)}/{window.max_operations} operations '
-                    f'in last {window.time_window_seconds}s'
+                    f'in last {window.time_window_seconds}s '
+                    f'(attempted by tercero {tercero})'
                 )
                 return False, (
                     f"Rate limit exceeded: {window.name} allows maximum "
                     f"{window.max_operations} operations per "
-                    f"{self._format_time_window(window.time_window_seconds)} for tercero {tercero}"
+                    f"{self._format_time_window(window.time_window_seconds)} globally"
                 )
 
         # Record operation
-        self.operations[tercero].append(now)
+        self.operations.append(now)
 
         logger.debug(
-            f'Rate limit check passed for {tercero}: '
-            f'{[len([ts for ts in self.operations[tercero] if now - ts < w.time_window_seconds]) for w in self.config.windows]}'
+            f'Rate limit check passed (tercero {tercero}): '
+            f'global counts: {[len([ts for ts in self.operations if now - ts < w.time_window_seconds]) for w in self.config.windows]}'
         )
 
         return True, ""
@@ -576,7 +579,7 @@ class RateLimiter:
         Initialize the rate limiter.
 
         Args:
-            max_operations: Maximum operations allowed per time window
+            max_operations: Maximum operations allowed per time window (globally)
             time_window: Time window in seconds (default 1 hour)
         """
         logger.warning(
@@ -584,19 +587,21 @@ class RateLimiter:
         )
         self.max_operations = max_operations
         self.time_window = time_window
-        self.operations: Dict[str, list] = defaultdict(list)
+        self.operations: list = []  # Global operation tracking
 
         logger.info(
-            f'RateLimiter initialized: max {max_operations} operations '
-            f'per {time_window}s per tercero'
+            f'RateLimiter initialized (GLOBAL): max {max_operations} operations '
+            f'per {time_window}s'
         )
 
     def check_rate_limit(self, tercero: str) -> Tuple[bool, str]:
         """
         Check if operation exceeds rate limit.
 
+        Note: Rate limits are GLOBAL (across all terceros), not per-tercero.
+
         Args:
-            tercero: Third party identifier
+            tercero: Third party identifier (logged for audit purposes only)
 
         Returns:
             Tuple of (allowed, error_message)
@@ -604,29 +609,30 @@ class RateLimiter:
         now = time.time()
 
         # Clean old operations outside the time window
-        self.operations[tercero] = [
-            ts for ts in self.operations[tercero]
+        self.operations = [
+            ts for ts in self.operations
             if now - ts < self.time_window
         ]
 
-        # Check limit
-        current_count = len(self.operations[tercero])
+        # Check limit (globally)
+        current_count = len(self.operations)
         if current_count >= self.max_operations:
             logger.warning(
-                f'RATE LIMIT: Tercero {tercero} exceeded limit: '
-                f'{current_count}/{self.max_operations} operations in last {self.time_window}s'
+                f'RATE LIMIT (GLOBAL): Limit exceeded: '
+                f'{current_count}/{self.max_operations} operations in last {self.time_window}s '
+                f'(attempted by tercero {tercero})'
             )
             return False, (
                 f"Rate limit exceeded: maximum {self.max_operations} operations "
-                f"per {self.time_window // 3600} hour(s) for tercero {tercero}"
+                f"per {self.time_window // 3600} hour(s) globally"
             )
 
         # Record operation
-        self.operations[tercero].append(now)
+        self.operations.append(now)
 
         logger.debug(
-            f'Rate limit check passed for {tercero}: '
-            f'{current_count + 1}/{self.max_operations} operations'
+            f'Rate limit check passed (tercero {tercero}): '
+            f'{current_count + 1}/{self.max_operations} operations globally'
         )
 
         return True, ""

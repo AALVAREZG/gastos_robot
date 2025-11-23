@@ -144,10 +144,44 @@ def test_multi_window_rate_limiter():
     print()
 
 
+def test_global_rate_limiting():
+    """Test that rate limits are global across all terceros."""
+    print("=" * 70)
+    print("Test 4: Global Rate Limiting (Multiple Terceros)")
+    print("=" * 70)
+
+    # Create rate limiter with tight limit
+    config = RateLimitConfig(
+        windows=[RateLimitWindow(5, 60, 'global_limit')],  # 5 ops per minute GLOBALLY
+        business_hours=None
+    )
+
+    limiter = MultiWindowRateLimiter(config)
+    print("✓ Rate limiter created with global limit: 5 ops/minute")
+
+    # Operations from different terceros should count toward same limit
+    terceros = ["TERCERO-A", "TERCERO-B", "TERCERO-C"]
+
+    # First 5 operations (across different terceros) should be allowed
+    for i in range(5):
+        tercero = terceros[i % 3]
+        allowed, error = limiter.check_rate_limit(tercero)
+        assert allowed, f"Operation {i+1} should be allowed: {error}"
+        print(f"✓ Operation {i+1}/5 allowed (from {tercero})")
+
+    # 6th operation from ANY tercero should be blocked
+    allowed, error = limiter.check_rate_limit("TERCERO-D")
+    assert not allowed, "6th operation should be blocked (global limit)"
+    assert "globally" in error, f"Error should mention 'globally': {error}"
+    print(f"✓ Operation 6 blocked (global limit): {error}")
+
+    print()
+
+
 def test_business_hours():
     """Test business hours enforcement."""
     print("=" * 70)
-    print("Test 4: Business Hours Enforcement")
+    print("Test 5: Business Hours Enforcement")
     print("=" * 70)
 
     # Create rate limiter with business hours
@@ -221,6 +255,7 @@ def main():
         test_config_save_load()
         test_tamper_detection()
         test_multi_window_rate_limiter()
+        test_global_rate_limiting()
         test_business_hours()
 
         print("=" * 70)

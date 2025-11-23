@@ -50,9 +50,15 @@ The system uses these defaults if no configuration file is present:
 - **Timezone:** Europe/Madrid (Spanish time)
 - **Enforcement:** Operations outside these hours are rejected
 
-### Per-Tercero Tracking
+### Global Tracking
 
-All rate limits are enforced **per tercero** (third party identifier). Each tercero has independent limits.
+All rate limits are enforced **GLOBALLY** across all terceros. All `force_create` operations, regardless of which tercero they belong to, count toward the same shared limit pool.
+
+**Example:**
+- Tercero A performs 10 operations
+- Tercero B performs 5 operations
+- **Total: 15 operations** (hourly limit reached)
+- Next operation from ANY tercero will be rejected until the time window expires
 
 ---
 

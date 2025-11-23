@@ -32,7 +32,7 @@ The SICAL Gastos Robot now implements a **token-based duplicate confirmation sys
 - ✅ **Time-limited tokens** - Tokens expire after 5 minutes
 - ✅ **One-time use** - Each token can only be used once (prevents replay attacks)
 - ✅ **Data integrity** - Tokens are tied to specific operation data
-- ✅ **Multi-window rate limiting** - 15 ops/hour AND 30 ops/day per tercero
+- ✅ **Multi-window rate limiting** - 15 ops/hour AND 30 ops/day (GLOBAL across all terceros)
 - ✅ **Business hours enforcement** - Operations restricted to 7 AM - 7 PM (Spanish time)
 - ✅ **Tamper-proof configuration** - Cryptographically signed config files
 - ✅ **Full audit trail** - All force-create attempts are logged
@@ -626,20 +626,23 @@ def create_ado220_operation(operation_data: dict) -> dict:
 #### 6. Rate Limit Exceeded
 
 **Error:**
-- `"Rate limit exceeded: hourly_limit allows maximum 15 operations per 60 minutes for tercero P4001500D"`
-- `"Rate limit exceeded: daily_limit allows maximum 30 operations per 1 day(s) for tercero P4001500D"`
+- `"Rate limit exceeded: hourly_limit allows maximum 15 operations per 60 minutes globally"`
+- `"Rate limit exceeded: daily_limit allows maximum 30 operations per 1 day(s) globally"`
 
-**Cause:** Too many `force_create` operations for the same tercero
+**Cause:** Too many `force_create` operations **across all terceros** (global limit)
 
 **Rate Limits (default configuration):**
-- **Hourly limit**: 15 operations per 60 minutes
-- **Daily limit**: 30 operations per 24 hours
+- **Hourly limit**: 15 operations per 60 minutes (GLOBAL - shared across all terceros)
+- **Daily limit**: 30 operations per 24 hours (GLOBAL - shared across all terceros)
 - **Business hours**: Operations only allowed 7:00 AM - 7:00 PM (Europe/Madrid timezone)
+
+**Important:** Rate limits are **GLOBAL**, not per-tercero. All `force_create` operations from all terceros count toward the same shared limit.
 
 **Solution:**
 - Wait for the rate limit window to expire
 - Check if duplicates are being created unintentionally
 - Verify current time is within business hours (7 AM - 7 PM Spanish time)
+- Coordinate with other users if multiple people are creating operations
 - Contact administrator if legitimate high-volume processing is needed
 
 **Note:** Rate limiting applies to `force_create` policy only (defense-in-depth security measure)
@@ -834,12 +837,16 @@ For questions or issues:
 ### Version 2.2 (2025-01-17)
 
 **Advanced Rate Limiting:**
-- **ENHANCED** Multi-window rate limiting (15 ops/60 min AND 30 ops/day per tercero)
+- **ENHANCED** Multi-window rate limiting (15 ops/60 min AND 30 ops/day GLOBAL)
+- **CHANGED** Rate limits now GLOBAL across all terceros (not per-tercero)
 - **ADDED** Business hours enforcement (7:00 AM - 7:00 PM Europe/Madrid)
 - **ADDED** Secure cryptographically-signed configuration system
 - **ADDED** `generate_rate_config.py` utility for managing rate limit configuration
 - Tamper-proof configuration files with HMAC-SHA256 signatures
 - Automatic fallback to defaults if config file missing or invalid
+
+**Breaking Change:**
+- Rate limits changed from per-tercero to global. All users now share the same rate limit pool.
 
 ### Version 2.1 (2025-01-17)
 
