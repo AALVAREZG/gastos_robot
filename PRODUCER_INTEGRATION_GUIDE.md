@@ -1,9 +1,9 @@
 # SICAL Gastos Robot - Producer Integration Guide
 ## Duplicate Confirmation Token System
 
-**Version:** 2.0
+**Version:** 2.2
 **Last Updated:** 2025-01-17
-**Feature:** Token-based Duplicate Confirmation Security
+**Feature:** Token-based Duplicate Confirmation Security + Advanced Rate Limiting
 
 ---
 
@@ -32,6 +32,9 @@ The SICAL Gastos Robot now implements a **token-based duplicate confirmation sys
 - ✅ **Time-limited tokens** - Tokens expire after 5 minutes
 - ✅ **One-time use** - Each token can only be used once (prevents replay attacks)
 - ✅ **Data integrity** - Tokens are tied to specific operation data
+- ✅ **Multi-window rate limiting** - 15 ops/hour AND 30 ops/day per tercero
+- ✅ **Business hours enforcement** - Operations restricted to 7 AM - 7 PM (Spanish time)
+- ✅ **Tamper-proof configuration** - Cryptographically signed config files
 - ✅ **Full audit trail** - All force-create attempts are logged
 - ✅ **Backward compatible** - Existing messages work without changes
 
@@ -622,16 +625,35 @@ def create_ado220_operation(operation_data: dict) -> dict:
 
 #### 6. Rate Limit Exceeded
 
-**Error:** `"Rate limit exceeded: maximum 10 operations per 1 hour(s) for tercero P4001500D"`
+**Error:**
+- `"Rate limit exceeded: hourly_limit allows maximum 15 operations per 60 minutes for tercero P4001500D"`
+- `"Rate limit exceeded: daily_limit allows maximum 30 operations per 1 day(s) for tercero P4001500D"`
 
-**Cause:** Too many `force_create` operations for the same tercero in a short time
+**Cause:** Too many `force_create` operations for the same tercero
+
+**Rate Limits (default configuration):**
+- **Hourly limit**: 15 operations per 60 minutes
+- **Daily limit**: 30 operations per 24 hours
+- **Business hours**: Operations only allowed 7:00 AM - 7:00 PM (Europe/Madrid timezone)
 
 **Solution:**
-- Wait for the rate limit window to expire (1 hour)
+- Wait for the rate limit window to expire
 - Check if duplicates are being created unintentionally
+- Verify current time is within business hours (7 AM - 7 PM Spanish time)
 - Contact administrator if legitimate high-volume processing is needed
 
-**Note:** Rate limiting only applies to `force_create` policy (defense-in-depth security measure)
+**Note:** Rate limiting applies to `force_create` policy only (defense-in-depth security measure)
+
+#### 7. Business Hours Violation
+
+**Error:** `"Operations only allowed during business hours: 7:00 - 19:00 Europe/Madrid. Current time: 21:30 Europe/Madrid"`
+
+**Cause:** Attempted `force_create` operation outside configured business hours
+
+**Solution:**
+- Schedule operations during business hours (7:00 AM - 7:00 PM Spanish time)
+- Contact administrator if after-hours processing is required
+- Use `check_only` to verify duplicates anytime (not rate limited)
 
 ### Error Handling Best Practices
 
@@ -808,6 +830,16 @@ For questions or issues:
 ---
 
 ## Changelog
+
+### Version 2.2 (2025-01-17)
+
+**Advanced Rate Limiting:**
+- **ENHANCED** Multi-window rate limiting (15 ops/60 min AND 30 ops/day per tercero)
+- **ADDED** Business hours enforcement (7:00 AM - 7:00 PM Europe/Madrid)
+- **ADDED** Secure cryptographically-signed configuration system
+- **ADDED** `generate_rate_config.py` utility for managing rate limit configuration
+- Tamper-proof configuration files with HMAC-SHA256 signatures
+- Automatic fallback to defaults if config file missing or invalid
 
 ### Version 2.1 (2025-01-17)
 

@@ -19,11 +19,13 @@ import hmac
 import json
 import time
 import logging
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from dataclasses import dataclass
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 import secrets
+import os
 
 # Get logger
 logger = logging.getLogger(__name__)
@@ -299,12 +301,274 @@ class DuplicateConfirmationManager:
         }
 
 
+@dataclass
+class RateLimitWindow:
+    """Configuration for a single rate limit window."""
+    max_operations: int
+    time_window_seconds: int
+    name: str
+
+
+@dataclass
+class BusinessHours:
+    """Configuration for business hours restrictions."""
+    start_hour: int  # 0-23
+    end_hour: int    # 0-23
+    timezone: str    # e.g., "Europe/Madrid"
+
+
+@dataclass
+class RateLimitConfig:
+    """Complete rate limiting configuration."""
+    windows: List[RateLimitWindow]
+    business_hours: Optional[BusinessHours] = None
+
+
+class SecureConfigLoader:
+    """
+    Loads and validates cryptographically signed configuration files.
+
+    This prevents malicious users from tampering with security settings.
+    Configuration files are JSON with HMAC-SHA256 signatures.
+    """
+
+    def __init__(self, secret_key: Optional[str] = None):
+        """
+        Initialize the secure config loader.
+
+        Args:
+            secret_key: Secret key for HMAC verification (from environment or generated)
+        """
+        # Use environment variable or generate a persistent key
+        self.secret_key = secret_key or os.environ.get('SICAL_CONFIG_SECRET_KEY')
+
+        if not self.secret_key:
+            # Generate and warn (should be set in production)
+            self.secret_key = secrets.token_hex(32)
+            logger.warning(
+                'SECURITY WARNING: No SICAL_CONFIG_SECRET_KEY found in environment. '
+                'Generated temporary key. Configuration signatures will not persist across restarts. '
+                'Set SICAL_CONFIG_SECRET_KEY environment variable for production use.'
+            )
+
+    def load_config(self, config_path: str) -> Dict[str, Any]:
+        """
+        Load and validate a signed configuration file.
+
+        Args:
+            config_path: Path to the configuration file
+
+        Returns:
+            Configuration dictionary
+
+        Raises:
+            ValueError: If signature is invalid or file is corrupted
+        """
+        try:
+            with open(config_path, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+        except FileNotFoundError:
+            logger.warning(f'Config file not found: {config_path}, using defaults')
+            return {}
+        except json.JSONDecodeError as e:
+            logger.error(f'Invalid JSON in config file {config_path}: {e}')
+            raise ValueError(f'Corrupted configuration file: {e}')
+
+        # Extract signature and config
+        signature = data.get('signature')
+        config = data.get('config')
+
+        if not signature or not config:
+            raise ValueError('Configuration file missing signature or config section')
+
+        # Verify signature
+        expected_signature = self._sign_config(config)
+        if not hmac.compare_digest(signature, expected_signature):
+            logger.error(
+                f'SECURITY: Invalid configuration signature in {config_path}! '
+                'Configuration may have been tampered with.'
+            )
+            raise ValueError('Configuration signature verification failed - possible tampering')
+
+        logger.info(f'Configuration loaded and verified from {config_path}')
+        return config
+
+    def save_config(self, config: Dict[str, Any], config_path: str) -> None:
+        """
+        Save a signed configuration file.
+
+        Args:
+            config: Configuration dictionary
+            config_path: Path to save the configuration
+        """
+        signature = self._sign_config(config)
+
+        data = {
+            'signature': signature,
+            'config': config,
+            'generated_at': datetime.now(timezone.utc).isoformat(),
+            'note': 'This file is cryptographically signed. Manual edits will be rejected.'
+        }
+
+        with open(config_path, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+
+        logger.info(f'Signed configuration saved to {config_path}')
+
+    def _sign_config(self, config: Dict[str, Any]) -> str:
+        """Create HMAC signature for configuration."""
+        config_str = json.dumps(config, sort_keys=True, separators=(',', ':'))
+        signature = hmac.new(
+            self.secret_key.encode(),
+            config_str.encode(),
+            hashlib.sha256
+        )
+        return signature.hexdigest()
+
+
+class MultiWindowRateLimiter:
+    """
+    Advanced rate limiter with multiple time windows and business hours enforcement.
+
+    Supports:
+    - Multiple concurrent time windows (e.g., 15/hour AND 30/day)
+    - Business hours restrictions
+    - Per-tercero tracking
+    - Secure configuration loading
+    """
+
+    def __init__(self, config: RateLimitConfig):
+        """
+        Initialize the multi-window rate limiter.
+
+        Args:
+            config: Rate limit configuration with windows and business hours
+        """
+        self.config = config
+        self.operations: Dict[str, List[float]] = defaultdict(list)
+
+        # Log configuration
+        window_info = ', '.join([
+            f'{w.max_operations} ops per {w.time_window_seconds}s ({w.name})'
+            for w in config.windows
+        ])
+        logger.info(f'MultiWindowRateLimiter initialized: {window_info}')
+
+        if config.business_hours:
+            logger.info(
+                f'Business hours enforced: {config.business_hours.start_hour}:00 - '
+                f'{config.business_hours.end_hour}:00 {config.business_hours.timezone}'
+            )
+
+    def check_rate_limit(self, tercero: str) -> Tuple[bool, str]:
+        """
+        Check if operation exceeds any rate limit window or business hours.
+
+        Args:
+            tercero: Third party identifier
+
+        Returns:
+            Tuple of (allowed, error_message)
+        """
+        now = time.time()
+
+        # Check business hours first
+        if self.config.business_hours:
+            allowed, error = self._check_business_hours(now)
+            if not allowed:
+                return False, error
+
+        # Clean old operations for all windows
+        max_window = max(w.time_window_seconds for w in self.config.windows)
+        self.operations[tercero] = [
+            ts for ts in self.operations[tercero]
+            if now - ts < max_window
+        ]
+
+        # Check each window
+        for window in self.config.windows:
+            recent_ops = [
+                ts for ts in self.operations[tercero]
+                if now - ts < window.time_window_seconds
+            ]
+
+            if len(recent_ops) >= window.max_operations:
+                logger.warning(
+                    f'RATE LIMIT: Tercero {tercero} exceeded {window.name} limit: '
+                    f'{len(recent_ops)}/{window.max_operations} operations '
+                    f'in last {window.time_window_seconds}s'
+                )
+                return False, (
+                    f"Rate limit exceeded: {window.name} allows maximum "
+                    f"{window.max_operations} operations per "
+                    f"{self._format_time_window(window.time_window_seconds)} for tercero {tercero}"
+                )
+
+        # Record operation
+        self.operations[tercero].append(now)
+
+        logger.debug(
+            f'Rate limit check passed for {tercero}: '
+            f'{[len([ts for ts in self.operations[tercero] if now - ts < w.time_window_seconds]) for w in self.config.windows]}'
+        )
+
+        return True, ""
+
+    def _check_business_hours(self, timestamp: float) -> Tuple[bool, str]:
+        """
+        Check if timestamp falls within configured business hours.
+
+        Args:
+            timestamp: Unix timestamp to check
+
+        Returns:
+            Tuple of (allowed, error_message)
+        """
+        if not self.config.business_hours:
+            return True, ""
+
+        bh = self.config.business_hours
+
+        try:
+            tz = ZoneInfo(bh.timezone)
+        except Exception as e:
+            logger.error(f'Invalid timezone {bh.timezone}: {e}')
+            return True, ""  # Fail open if timezone is invalid
+
+        dt = datetime.fromtimestamp(timestamp, tz=tz)
+        current_hour = dt.hour
+
+        # Check if within business hours
+        if current_hour < bh.start_hour or current_hour >= bh.end_hour:
+            logger.warning(
+                f'BUSINESS HOURS: Operation attempted at {dt.strftime("%H:%M")} '
+                f'{bh.timezone}, outside allowed hours '
+                f'{bh.start_hour}:00-{bh.end_hour}:00'
+            )
+            return False, (
+                f"Operations only allowed during business hours: "
+                f"{bh.start_hour}:00 - {bh.end_hour}:00 {bh.timezone}. "
+                f"Current time: {dt.strftime('%H:%M')} {bh.timezone}"
+            )
+
+        return True, ""
+
+    def _format_time_window(self, seconds: int) -> str:
+        """Format time window in human-readable form."""
+        if seconds < 3600:
+            return f"{seconds // 60} minutes"
+        elif seconds < 86400:
+            return f"{seconds // 3600} hour(s)"
+        else:
+            return f"{seconds // 86400} day(s)"
+
+
 class RateLimiter:
     """
-    Rate limiter to prevent mass duplicate creation.
+    DEPRECATED: Simple single-window rate limiter.
 
-    Limits the number of operations that can be created per tercero
-    within a configurable time window.
+    Use MultiWindowRateLimiter for new implementations.
+    This class is kept for backward compatibility.
     """
 
     def __init__(self, max_operations: int = 10, time_window: int = 3600):
@@ -315,6 +579,9 @@ class RateLimiter:
             max_operations: Maximum operations allowed per time window
             time_window: Time window in seconds (default 1 hour)
         """
+        logger.warning(
+            'RateLimiter is deprecated. Use MultiWindowRateLimiter for new implementations.'
+        )
         self.max_operations = max_operations
         self.time_window = time_window
         self.operations: Dict[str, list] = defaultdict(list)
@@ -367,7 +634,8 @@ class RateLimiter:
 
 # Global instances (one per consumer process)
 _confirmation_manager: Optional[DuplicateConfirmationManager] = None
-_rate_limiter: Optional[RateLimiter] = None
+_rate_limiter: Optional[MultiWindowRateLimiter] = None
+_config_loader: Optional[SecureConfigLoader] = None
 
 
 def get_confirmation_manager() -> DuplicateConfirmationManager:
@@ -385,18 +653,148 @@ def get_confirmation_manager() -> DuplicateConfirmationManager:
     return _confirmation_manager
 
 
-def get_rate_limiter() -> RateLimiter:
+def load_rate_limit_config(config_path: str = 'rate_limit_config.json') -> RateLimitConfig:
+    """
+    Load rate limit configuration from secure signed config file.
+
+    If config file doesn't exist, returns default configuration:
+    - 15 operations per 60 minutes
+    - 30 operations per day
+    - Business hours: 7am-7pm Europe/Madrid
+
+    Args:
+        config_path: Path to configuration file
+
+    Returns:
+        RateLimitConfig instance
+    """
+    global _config_loader
+
+    if _config_loader is None:
+        _config_loader = SecureConfigLoader()
+
+    try:
+        config_dict = _config_loader.load_config(config_path)
+
+        if not config_dict:
+            # Use defaults
+            logger.info('Using default rate limit configuration')
+            return _get_default_rate_limit_config()
+
+        # Parse configuration
+        windows = [
+            RateLimitWindow(
+                max_operations=w['max_operations'],
+                time_window_seconds=w['time_window_seconds'],
+                name=w['name']
+            )
+            for w in config_dict.get('windows', [])
+        ]
+
+        business_hours = None
+        if 'business_hours' in config_dict:
+            bh = config_dict['business_hours']
+            business_hours = BusinessHours(
+                start_hour=bh['start_hour'],
+                end_hour=bh['end_hour'],
+                timezone=bh['timezone']
+            )
+
+        return RateLimitConfig(windows=windows, business_hours=business_hours)
+
+    except Exception as e:
+        logger.error(f'Failed to load rate limit config: {e}, using defaults')
+        return _get_default_rate_limit_config()
+
+
+def _get_default_rate_limit_config() -> RateLimitConfig:
+    """Get default rate limit configuration."""
+    return RateLimitConfig(
+        windows=[
+            RateLimitWindow(
+                max_operations=15,
+                time_window_seconds=3600,  # 60 minutes
+                name='hourly_limit'
+            ),
+            RateLimitWindow(
+                max_operations=30,
+                time_window_seconds=86400,  # 24 hours
+                name='daily_limit'
+            )
+        ],
+        business_hours=BusinessHours(
+            start_hour=7,
+            end_hour=19,  # 7pm (exclusive, so operations allowed until 18:59)
+            timezone='Europe/Madrid'
+        )
+    )
+
+
+def save_rate_limit_config(
+    config: RateLimitConfig,
+    config_path: str = 'rate_limit_config.json'
+) -> None:
+    """
+    Save rate limit configuration to a secure signed file.
+
+    This is used to generate initial configuration or update it.
+    Only authorized administrators should use this function.
+
+    Args:
+        config: Rate limit configuration to save
+        config_path: Path to save configuration
+
+    Example:
+        config = RateLimitConfig(
+            windows=[
+                RateLimitWindow(15, 3600, 'hourly_limit'),
+                RateLimitWindow(30, 86400, 'daily_limit')
+            ],
+            business_hours=BusinessHours(7, 19, 'Europe/Madrid')
+        )
+        save_rate_limit_config(config)
+    """
+    global _config_loader
+
+    if _config_loader is None:
+        _config_loader = SecureConfigLoader()
+
+    config_dict = {
+        'windows': [
+            {
+                'max_operations': w.max_operations,
+                'time_window_seconds': w.time_window_seconds,
+                'name': w.name
+            }
+            for w in config.windows
+        ]
+    }
+
+    if config.business_hours:
+        config_dict['business_hours'] = {
+            'start_hour': config.business_hours.start_hour,
+            'end_hour': config.business_hours.end_hour,
+            'timezone': config.business_hours.timezone
+        }
+
+    _config_loader.save_config(config_dict, config_path)
+    logger.info(f'Rate limit configuration saved to {config_path}')
+
+
+def get_rate_limiter() -> MultiWindowRateLimiter:
     """
     Get the global rate limiter instance.
 
-    Creates a new instance on first call, then returns the same instance.
+    Creates a new instance on first call with configuration loaded from
+    rate_limit_config.json (or defaults if not found).
 
     Returns:
-        RateLimiter instance
+        MultiWindowRateLimiter instance
     """
     global _rate_limiter
     if _rate_limiter is None:
-        _rate_limiter = RateLimiter()
+        config = load_rate_limit_config()
+        _rate_limiter = MultiWindowRateLimiter(config)
     return _rate_limiter
 
 
