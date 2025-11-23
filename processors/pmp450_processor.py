@@ -236,8 +236,21 @@ class PMP450Processor(SicalOperationProcessor):
 
             self.logger.info(f'force_create token validated successfully for tercero: {operation_data.get("tercero")}')
 
+            # SECURITY: Rate limiting for force_create (defense-in-depth)
+            rate_limiter = get_rate_limiter()
+            tercero = operation_data.get('tercero', 'UNKNOWN')
+            allowed, rate_error = rate_limiter.check_rate_limit(tercero)
+
+            if not allowed:
+                self.logger.error(f'SECURITY: Rate limit exceeded for force_create: {rate_error}')
+                result.status = OperationStatus.FAILED
+                result.error = f'Rate limit exceeded: {rate_error}'
+                return result
+
+            self.logger.info(f'Rate limit check passed for tercero: {tercero}')
+
         # Phase: Check for duplicate operations (based on policy)
-        if duplicate_policy in ('check_only', 'abort_on_duplicate', 'warn_and_continue'):
+        if duplicate_policy in ('check_only', 'abort_on_duplicate'):
             result = self._check_for_duplicates(operation_data, result)
 
             if duplicate_policy == 'check_only':
@@ -253,17 +266,8 @@ class PMP450Processor(SicalOperationProcessor):
                 if result.status in (OperationStatus.FAILED, OperationStatus.P_DUPLICATED):
                     return result
 
-            elif duplicate_policy == 'warn_and_continue':
-                # Log warning but continue creating operation
-                if result.status == OperationStatus.P_DUPLICATED:
-                    self.logger.warning(
-                        f'Duplicates found but continuing due to policy: '
-                        f'{result.similiar_records_encountered} similar records'
-                    )
-                    result.status = OperationStatus.IN_PROGRESS  # Reset status to continue
-
         # elif duplicate_policy == 'force_create':
-        #     Skip duplicate check entirely - already validated token above
+        #     Skip duplicate check entirely - already validated token and rate limit above
 
         # Phase: Enter operation data
         self.notify_step('Entering operation data into form')

@@ -91,16 +91,19 @@ Add these fields to the `detalle` object:
 
 ### Policy Options
 
-| Policy | Behavior | Use Case | Token Required |
-|--------|----------|----------|----------------|
-| `check_only` | Check for duplicates, **don't create** operation | **Phase 1**: Initial duplicate check | No |
-| `force_create` | **Skip** duplicate check, always create | **Phase 2**: Create after user confirms | **YES** |
-| `abort_on_duplicate` | Check duplicates, abort if found (**default**) | Current behavior, backward compatible | No |
-| `warn_and_continue` | Check duplicates, log warning but continue | Tolerant mode for auto-processing | No |
+| Policy | Behavior | Use Case | Token Required | Rate Limited |
+|--------|----------|----------|----------------|--------------|
+| `check_only` | Check for duplicates, **don't create** operation | **Phase 1**: Initial duplicate check | No | No |
+| `force_create` | **Skip** duplicate check, always create | **Phase 2**: Create after user confirms | **YES** | **YES** |
+| `abort_on_duplicate` | Check duplicates, abort if found (**default**) | Current behavior, backward compatible | No | No |
 
 ### Default Behavior
 
 If `duplicate_policy` is **not specified**, the system defaults to `"abort_on_duplicate"` (current behavior).
+
+### Removed Policies
+
+**`warn_and_continue`** has been **removed** for security reasons. It allowed bypassing duplicate checks without token validation, creating a security vulnerability. Use `force_create` with proper token validation instead.
 
 ---
 
@@ -173,17 +176,18 @@ Consumer validates token:
   ✓ Token not expired?
   ✓ Token not already used?
   ✓ Token matches operation data?
+  ✓ Rate limit not exceeded? (max 10 ops/hour per tercero)
 
        ↓
 
 ┌──────────┴──────────┐
 │                      │
 v                      v
-TOKEN VALID       TOKEN INVALID
+ALL CHECKS PASS   CHECK FAILED
      │                │
      v                v
 Create            REJECT with error
-Operation         (Security validation failed)
+Operation         (Security/Rate limit failed)
      │
      v
 Return:
@@ -616,6 +620,19 @@ def create_ado220_operation(operation_data: dict) -> dict:
 
 **Solution:** Ensure operation data is identical between check and create phases
 
+#### 6. Rate Limit Exceeded
+
+**Error:** `"Rate limit exceeded: maximum 10 operations per 1 hour(s) for tercero P4001500D"`
+
+**Cause:** Too many `force_create` operations for the same tercero in a short time
+
+**Solution:**
+- Wait for the rate limit window to expire (1 hour)
+- Check if duplicates are being created unintentionally
+- Contact administrator if legitimate high-volume processing is needed
+
+**Note:** Rate limiting only applies to `force_create` policy (defense-in-depth security measure)
+
 ### Error Handling Best Practices
 
 ```typescript
@@ -791,6 +808,13 @@ For questions or issues:
 ---
 
 ## Changelog
+
+### Version 2.1 (2025-01-17)
+
+**Security Improvements:**
+- **REMOVED** `warn_and_continue` policy (security vulnerability)
+- **ADDED** Rate limiting for `force_create` operations (10 ops/hour per tercero)
+- Defense-in-depth security for duplicate override operations
 
 ### Version 2.0 (2025-01-17)
 
