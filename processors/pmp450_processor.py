@@ -196,13 +196,37 @@ class PMP450Processor(SicalOperationProcessor):
         self.logger.debug(f'PMP450 window: {self.window_manager.ventana_proceso}')
         return bool(self.window_manager.ventana_proceso)
 
+    def check_for_duplicates_pre_window(
+        self,
+        operation_data: Dict[str, Any],
+        result: OperationResult
+    ) -> OperationResult:
+        """
+        Check for duplicates BEFORE opening PMP450 window.
+
+        This is called by the base execute() method before setup_operation_window(),
+        allowing us to avoid opening the PMP450 window if duplicates are found.
+
+        Args:
+            operation_data: Prepared SICAL-compatible operation data
+            result: Current operation result object
+
+        Returns:
+            Updated operation result (may set status to P_DUPLICATED)
+        """
+        return self._check_for_duplicates(operation_data, result)
+
     def process_operation_form(
         self,
         operation_data: Dict[str, Any],
         result: OperationResult
     ) -> OperationResult:
         """
-        Process the complete PMP450 operation workflow.
+        Process the PMP450 operation (data entry and finalization only).
+
+        NOTE: Duplicate checking and security validation now happen BEFORE
+        this method is called (in the base execute() method), so this method
+        focuses solely on data entry and finalization.
 
         Args:
             operation_data: Prepared SICAL-compatible operation data
@@ -216,58 +240,6 @@ class PMP450Processor(SicalOperationProcessor):
                         f'Lines: {len(operation_data.get("aplicaciones", []))}')
 
         finalizar_operacion = operation_data.get('finalizar_operacion', False)
-        duplicate_policy = operation_data.get('duplicate_policy', 'abort_on_duplicate')
-
-        # SECURITY: Validate force_create token before processing
-        if duplicate_policy == 'force_create':
-            confirmation_manager = get_confirmation_manager()
-            token_id = operation_data.get('duplicate_confirmation_token')
-
-            is_valid, error_msg = confirmation_manager.validate_token(token_id, operation_data)
-
-            # Audit log the attempt
-            audit_log_force_create(operation_data, is_valid, error_msg)
-
-            if not is_valid:
-                self.logger.error(f'SECURITY: Invalid force_create attempt: {error_msg}')
-                result.status = OperationStatus.FAILED
-                result.error = f'Security validation failed: {error_msg}'
-                return result
-
-            self.logger.info(f'force_create token validated successfully for tercero: {operation_data.get("tercero")}')
-
-            # SECURITY: Rate limiting for force_create (defense-in-depth)
-            rate_limiter = get_rate_limiter()
-            tercero = operation_data.get('tercero', 'UNKNOWN')
-            allowed, rate_error = rate_limiter.check_rate_limit(tercero)
-
-            if not allowed:
-                self.logger.error(f'SECURITY: Rate limit exceeded for force_create: {rate_error}')
-                result.status = OperationStatus.FAILED
-                result.error = f'Rate limit exceeded: {rate_error}'
-                return result
-
-            self.logger.info(f'Rate limit check passed for tercero: {tercero}')
-
-        # Phase: Check for duplicate operations (based on policy)
-        if duplicate_policy in ('check_only', 'abort_on_duplicate'):
-            result = self._check_for_duplicates(operation_data, result)
-
-            if duplicate_policy == 'check_only':
-                # ONLY check, don't create operation
-                if result.status == OperationStatus.P_DUPLICATED:
-                    self.logger.info(f'Check-only mode: Found {result.similiar_records_encountered} duplicates')
-                else:
-                    self.logger.info('Check-only mode: No duplicates found')
-                return result  # Return immediately without creating operation
-
-            elif duplicate_policy == 'abort_on_duplicate':
-                # Current behavior: abort if duplicates found
-                if result.status in (OperationStatus.FAILED, OperationStatus.P_DUPLICATED):
-                    return result
-
-        # elif duplicate_policy == 'force_create':
-        #     Skip duplicate check entirely - already validated token and rate limit above
 
         # Phase: Enter operation data
         self.notify_step('Entering operation data into form')
