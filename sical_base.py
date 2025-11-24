@@ -245,6 +245,28 @@ class SicalOperationProcessor(ABC):
         pass
 
     @abstractmethod
+    def check_for_duplicates_pre_window(
+        self,
+        operation_data: Dict[str, Any],
+        result: OperationResult
+    ) -> OperationResult:
+        """
+        Check for duplicates BEFORE opening the main operation window.
+
+        This allows early termination if duplicates are found, avoiding
+        unnecessary window opening operations. This is called by execute()
+        before setup_operation_window().
+
+        Args:
+            operation_data: Prepared SICAL-compatible operation data
+            result: Current operation result object
+
+        Returns:
+            Updated operation result (may set status to P_DUPLICATED or FAILED)
+        """
+        pass
+
+    @abstractmethod
     def process_operation_form(
         self,
         operation_data: Dict[str, Any],
@@ -261,6 +283,58 @@ class SicalOperationProcessor(ABC):
             Updated operation result
         """
         pass
+
+    def _validate_force_create_token(
+        self,
+        operation_data: Dict[str, Any],
+        result: OperationResult
+    ) -> OperationResult:
+        """
+        Validate force_create security token BEFORE opening window.
+
+        This ensures that only authorized force_create operations proceed
+        to window opening, preventing wasteful operations.
+
+        Args:
+            operation_data: Operation data with security token
+            result: Current operation result
+
+        Returns:
+            Updated operation result (FAILED if validation fails)
+        """
+        from sical_security import (
+            get_confirmation_manager,
+            get_rate_limiter,
+            audit_log_force_create,
+        )
+
+        confirmation_manager = get_confirmation_manager()
+        token_id = operation_data.get('duplicate_confirmation_token')
+
+        is_valid, error_msg = confirmation_manager.validate_token(token_id, operation_data)
+        audit_log_force_create(operation_data, is_valid, error_msg)
+
+        if not is_valid:
+            self.logger.error(f'SECURITY: Invalid force_create attempt: {error_msg}')
+            result.status = OperationStatus.FAILED
+            result.error = f'Security validation failed: {error_msg}'
+            return result
+
+        self.logger.info(f'force_create token validated successfully for tercero: {operation_data.get("tercero")}')
+
+        # Rate limiting (defense-in-depth)
+        rate_limiter = get_rate_limiter()
+        tercero = operation_data.get('tercero', 'UNKNOWN')
+        allowed, rate_error = rate_limiter.check_rate_limit(tercero)
+
+        if not allowed:
+            self.logger.error(f'SECURITY: Rate limit exceeded: {rate_error}')
+            result.status = OperationStatus.FAILED
+            result.error = f'Rate limit exceeded: {rate_error}'
+            return result
+
+        self.logger.info(f'Rate limit check passed for tercero: {tercero}')
+        return result
 
     def execute(self, operation_data: Dict[str, Any]) -> OperationResult:
         """
@@ -298,7 +372,40 @@ class SicalOperationProcessor(ABC):
             self.logger.info(f'{self.operation_name} data prepared')
             result.completed_phases.append({'phase': 'data_creation', 'description': 'Created operation data'})
 
-            # Phase 2: Setup SICAL window
+            # Phase 1.5: Check for duplicates BEFORE opening window
+            # This is the key efficiency improvement - we avoid opening the window
+            # if duplicates are found or if we're only checking
+            duplicate_policy = sical_data.get('duplicate_policy', 'abort_on_duplicate')
+
+            if duplicate_policy in ('check_only', 'abort_on_duplicate'):
+                self.notify_step('Checking for duplicates')
+                result = self.check_for_duplicates_pre_window(sical_data, result)
+
+                # Early exit if check-only mode (regardless of duplicate status)
+                if duplicate_policy == 'check_only':
+                    self.logger.info('Check-only mode - returning without opening window')
+                    return result
+
+                # Early exit if duplicates found in abort mode
+                if result.status == OperationStatus.P_DUPLICATED and duplicate_policy == 'abort_on_duplicate':
+                    self.logger.info(f'Duplicate detected - aborting without opening {self.operation_name} window')
+                    return result
+
+                # If we reach here, no duplicates found - continue to window opening
+                self.logger.info('No duplicates found - proceeding to open window')
+
+            elif duplicate_policy == 'force_create':
+                # Validate token BEFORE opening window
+                self.notify_step('Validating force_create security token')
+                result = self._validate_force_create_token(sical_data, result)
+
+                if result.status == OperationStatus.FAILED:
+                    self.logger.error('Token validation failed - aborting without opening window')
+                    return result
+
+                self.logger.info('force_create validated - proceeding to open window')
+
+            # Phase 2: Setup SICAL window (ONLY if no duplicates or force_create validated)
             self.notify_step(f'Opening {self.operation_name} window')
             if not self.setup_operation_window():
                 result.status = OperationStatus.FAILED
