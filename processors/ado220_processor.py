@@ -391,6 +391,10 @@ class ADO220Processor(SicalOperationProcessor):
                 filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
                 time.sleep(DEFAULT_TIMING['short_wait'])
+                # Exit consulta window
+                # consulta_manager.ventana_proceso.find(CONSULTA_FORM_PATHS['salir_button']).click()
+                consulta_manager.close_window()
+                time.sleep(DEFAULT_TIMING['short_wait'])
 
             result.completed_phases.append({
                 'phase': 'duplicate_check',
@@ -553,6 +557,7 @@ class ADO220Processor(SicalOperationProcessor):
         """Fill the main panel fields in the ADO220 form."""
         # Fecha
         fecha_element = ventana.find(ADO220_FORM_PATHS['fecha']).double_click()
+        fecha_element.send_keys(keys='{HOME}', interval=0.03, wait_time=wait_time)
         fecha_element.send_keys(operation_data['fecha'], interval=0.03, wait_time=wait_time)
 
         # Expediente
@@ -691,12 +696,17 @@ class ADO220Processor(SicalOperationProcessor):
             # Confirm validation
             modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
             modal_confirm.find(COMMON_DIALOG_PATHS['confirm_yes']).click()
-            time.sleep(DEFAULT_TIMING['long_wait'])
+            time.sleep(DEFAULT_TIMING['medium_wait'])
 
             # Acknowledge information dialog
             modal_info = windows.find_window(SICAL_WINDOWS['information_dialog'])
             modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
-            time.sleep(DEFAULT_TIMING['long_wait'])
+            time.sleep(DEFAULT_TIMING['medium_wait'])
+
+            # Decline documentation attach (for now)
+            modal_attach = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
+            modal_attach.find(COMMON_DIALOG_PATHS['no_button']).click()
+            time.sleep(DEFAULT_TIMING['medium_wait'])
 
             # Get assigned operation number
             num_operacion_field = ventana.find(ADO220_FORM_PATHS['num_operacion'], raise_error=False)

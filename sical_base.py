@@ -145,6 +145,16 @@ class SicalWindowManager(ABC):
                 if boton_cerrar:
                     boton_cerrar.click()
                     self.ventana_proceso.find('class:"TButton" and name:"No"').click()
+                else:
+                    boton_salir = self.ventana_proceso.find(
+                    'name:"Cerrar"',
+                    search_depth=8,
+                    raise_error=False
+                    )
+                    if boton_salir:
+                        boton_salir.click()
+                        self.ventana_proceso.find('class:"TButton" and name:"No"').click()
+                
             except Exception as e:
                 self.logger.warning(f'Error closing window: {e}')
 

@@ -87,8 +87,8 @@ ADO220_FORM_PATHS = {
     'confirm_line_button': 'class:"TBitBtn" and path:"3|3|5"',
 
     # Action buttons
-    'nuevo_button': 'path:"2|2"',
-    'validar_button': 'name:"Validar" and path:"2|5"',
+    'nuevo_button': 'path:"2|3"',
+    'validar_button': 'name:"Validar" and path:"2|6"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
 
@@ -125,7 +125,7 @@ PMP450_FORM_PATHS = {
     'confirm_line_button': 'class:"TBitBtn" and path:"3|3|5"',
 
     # Action buttons
-    'nuevo_button': 'path:"2|2"',
+    'nuevo_button': 'path:"2|3"',
     'validar_button': 'name:"Validar" and path:"2|5"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
@@ -162,7 +162,7 @@ FILTROS_FORM_PATHS = {
     'caja': 'class:"Edit" and path:"2|16|1"',
     'consultar_button': 'class:"TBitBtn" and name:"Consultar"',
     'num_registros': 'class:"TEdit" and path:"1|1|2"',
-    'cerrar_button': 'control:"ButtonControl" and name:"Cerrar"',
+    'cerrar_button': 'control:"ButtonControl" and name:"Salir"',
 }
 
 # =============================================================================
