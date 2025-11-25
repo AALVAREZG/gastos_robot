@@ -37,6 +37,9 @@ class StatusManager:
         # Current task
         self.current_task: Optional[Dict[str, Any]] = None
 
+        # Last completed task (for displaying token info after completion)
+        self.last_completed_task: Optional[Dict[str, Any]] = None
+
         # Logs (using deque for efficient append/pop)
         self.logs = deque(maxlen=max_logs)
 
@@ -67,6 +70,9 @@ class StatusManager:
             self.stats['pending'] = max(0, self.stats['pending'] - 1)
             self.stats['processing'] += 1
 
+            # Clear last completed task when starting a new one
+            self.last_completed_task = None
+
             # Create current task info
             self.current_task = {
                 'task_id': task_id,
@@ -85,7 +91,11 @@ class StatusManager:
                 'cash_register': kwargs.get('cash_register'),
                 'total_line_items': kwargs.get('total_line_items', 0),
                 'current_line_item': 0,
-                'line_item_details': None
+                'line_item_details': None,
+                # Policy and token information
+                'duplicate_policy': kwargs.get('duplicate_policy'),
+                'duplicate_confirmation_token': kwargs.get('duplicate_confirmation_token'),
+                'token_status': 'received' if kwargs.get('duplicate_confirmation_token') else None
             }
 
         op_type_display = operation_type.upper() if operation_type else 'UNKNOWN'
@@ -122,6 +132,16 @@ class StatusManager:
                 # Calculate duration
                 self.current_task['duration'] = time.time() - self.current_task['start_time']
 
+    def update_token_status(self, status: str):
+        """Update the token status for the current task.
+
+        Args:
+            status: Token status ('received', 'validated', 'processing', 'finalized')
+        """
+        with self.lock:
+            if self.current_task:
+                self.current_task['token_status'] = status
+
     def task_completed(self, task_id: str, success: bool = True):
         """Mark a task as completed or failed."""
         with self.lock:
@@ -135,6 +155,14 @@ class StatusManager:
                 self.stats['failed'] += 1
                 status_text = "FAILED"
                 log_level = "ERROR"
+
+            # Save current task as last completed (for token retention)
+            if self.current_task:
+                self.last_completed_task = self.current_task.copy()
+                # Update token status to finalized
+                if self.last_completed_task.get('duplicate_confirmation_token'):
+                    self.last_completed_task['token_status'] = 'finalized'
+                self.last_completed_task['completion_status'] = status_text
 
             # Clear current task
             self.current_task = None
@@ -192,6 +220,7 @@ class StatusManager:
                 'stats': self.stats.copy(),
                 'success_rate': success_rate,
                 'current_task': current_task_copy,
+                'last_completed_task': self.last_completed_task.copy() if self.last_completed_task else None,
                 'recent_logs': list(self.logs)
             }
 

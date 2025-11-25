@@ -292,7 +292,10 @@ class GastoConsumer:
             'nature': operation_data.get('naturaleza'),
             'description': description,
             'total_line_items': len(aplicaciones),
-            'started_at': datetime.now().isoformat()
+            'started_at': datetime.now().isoformat(),
+            # Policy and token information
+            'duplicate_policy': operation_data.get('duplicate_policy'),
+            'duplicate_confirmation_token': operation_data.get('duplicate_confirmation_token')
         }
 
     def _process_operation(
