@@ -93,6 +93,7 @@ class GastosGUI:
         # Create tabs
         self.create_monitor_tab()
         self.create_history_tab()
+        self.create_logs_tab()
 
     def create_monitor_tab(self):
         """Create the Monitor tab with real-time status."""
@@ -325,6 +326,250 @@ class GastosGUI:
         )
         csv_btn.grid(row=0, column=3, padx=5)
 
+    def create_logs_tab(self):
+        """Create the Logs tab with complete logging history and filtering."""
+        # Create frame for logs tab
+        logs_frame = ttk.Frame(self.notebook, padding="10")
+        self.notebook.add(logs_frame, text="📋 Complete Logs")
+
+        # Configure grid
+        logs_frame.columnconfigure(0, weight=1)
+        logs_frame.rowconfigure(1, weight=1)  # Log display expands
+
+        # Filter Panel
+        self.create_log_filter_panel(logs_frame)
+
+        # Log Display
+        self.create_complete_log_display(logs_frame)
+
+        # Control Panel
+        self.create_log_control_panel(logs_frame)
+
+    def create_log_filter_panel(self, parent):
+        """Create log filter controls."""
+        filter_frame = ttk.LabelFrame(parent, text="🔍 Log Filters", padding="10")
+        filter_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+
+        # Log level filter
+        ttk.Label(filter_frame, text="Level:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        self.log_level_filter = ttk.Combobox(
+            filter_frame,
+            values=["All", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+            state="readonly",
+            width=12
+        )
+        self.log_level_filter.set("All")
+        self.log_level_filter.grid(row=0, column=1, sticky=tk.W, padx=(0, 15))
+        self.log_level_filter.bind("<<ComboboxSelected>>", lambda e: self.apply_log_filters())
+
+        # Search entry
+        ttk.Label(filter_frame, text="Search:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
+        self.log_search_entry = ttk.Entry(filter_frame, width=40)
+        self.log_search_entry.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(0, 10))
+        self.log_search_entry.bind("<KeyRelease>", lambda e: self.apply_log_filters())
+
+        # Apply button
+        apply_btn = ttk.Button(
+            filter_frame,
+            text="Apply",
+            command=self.apply_log_filters,
+            width=10
+        )
+        apply_btn.grid(row=0, column=4, padx=5)
+
+        # Clear filters button
+        clear_btn = ttk.Button(
+            filter_frame,
+            text="Clear",
+            command=self.clear_log_filters,
+            width=10
+        )
+        clear_btn.grid(row=0, column=5, padx=5)
+
+        # Configure column weights
+        filter_frame.columnconfigure(3, weight=1)
+
+    def create_complete_log_display(self, parent):
+        """Create the complete log display area."""
+        log_frame = ttk.LabelFrame(parent, text="📝 Complete Log History", padding="5")
+        log_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+
+        # Log text widget with scrollbar
+        self.complete_log_text = scrolledtext.ScrolledText(
+            log_frame,
+            wrap=tk.WORD,
+            width=100,
+            height=25,
+            font=("Consolas", 9),
+            state=tk.DISABLED
+        )
+        self.complete_log_text.pack(fill=tk.BOTH, expand=True)
+
+        # Configure log text tags for colors
+        self.complete_log_text.tag_config("INFO", foreground="black")
+        self.complete_log_text.tag_config("WARNING", foreground="orange")
+        self.complete_log_text.tag_config("ERROR", foreground="red")
+        self.complete_log_text.tag_config("CRITICAL", foreground="dark red")
+        self.complete_log_text.tag_config("DEBUG", foreground="gray")
+
+        # Configure grid weights
+        log_frame.columnconfigure(0, weight=1)
+        log_frame.rowconfigure(0, weight=1)
+
+    def create_log_control_panel(self, parent):
+        """Create log control buttons."""
+        control_frame = ttk.LabelFrame(parent, text="⚙️ Controls", padding="10")
+        control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+
+        # Auto-scroll checkbox
+        self.auto_scroll_var = tk.BooleanVar(value=True)
+        auto_scroll_check = ttk.Checkbutton(
+            control_frame,
+            text="Auto-scroll to bottom",
+            variable=self.auto_scroll_var
+        )
+        auto_scroll_check.grid(row=0, column=0, padx=5)
+
+        # Show timestamps checkbox
+        self.show_timestamps_var = tk.BooleanVar(value=True)
+        timestamps_check = ttk.Checkbutton(
+            control_frame,
+            text="Show timestamps",
+            variable=self.show_timestamps_var,
+            command=self.apply_log_filters
+        )
+        timestamps_check.grid(row=0, column=1, padx=5)
+
+        # Clear logs button
+        clear_logs_btn = ttk.Button(
+            control_frame,
+            text="🗑 Clear Logs",
+            command=self.clear_complete_logs,
+            width=15
+        )
+        clear_logs_btn.grid(row=0, column=2, padx=5)
+
+        # Export logs button
+        export_logs_btn = ttk.Button(
+            control_frame,
+            text="💾 Export Logs",
+            command=self.export_logs,
+            width=15
+        )
+        export_logs_btn.grid(row=0, column=3, padx=5)
+
+        # Refresh button
+        refresh_logs_btn = ttk.Button(
+            control_frame,
+            text="🔄 Refresh",
+            command=self.refresh_complete_logs,
+            width=15
+        )
+        refresh_logs_btn.grid(row=0, column=4, padx=5)
+
+    def apply_log_filters(self):
+        """Apply filters to the log display."""
+        # Get filter values
+        level_filter = self.log_level_filter.get()
+        search_term = self.log_search_entry.get().lower()
+        show_timestamps = self.show_timestamps_var.get()
+
+        # Get all logs from status manager
+        status = status_manager.get_status()
+        all_logs = status['recent_logs']
+
+        # Filter logs
+        filtered_logs = []
+        for log in all_logs:
+            # Level filter
+            if level_filter != "All":
+                if f"[{level_filter}]" not in log:
+                    continue
+
+            # Search filter
+            if search_term and search_term not in log.lower():
+                continue
+
+            # Remove timestamps if needed
+            if not show_timestamps and log.startswith("["):
+                # Extract just the message part
+                parts = log.split("]", 2)
+                if len(parts) >= 3:
+                    log = parts[2].strip()
+
+            filtered_logs.append(log)
+
+        # Update display
+        self.complete_log_text.config(state=tk.NORMAL)
+        self.complete_log_text.delete("1.0", tk.END)
+
+        for log in filtered_logs:
+            # Determine tag based on log level
+            tag = "INFO"
+            if "[ERROR]" in log or "[CRITICAL]" in log:
+                tag = "ERROR"
+            elif "[WARNING]" in log:
+                tag = "WARNING"
+            elif "[DEBUG]" in log:
+                tag = "DEBUG"
+
+            self.complete_log_text.insert(tk.END, log + "\n", tag)
+
+        # Auto-scroll if enabled
+        if self.auto_scroll_var.get():
+            self.complete_log_text.see(tk.END)
+
+        self.complete_log_text.config(state=tk.DISABLED)
+
+    def clear_log_filters(self):
+        """Clear all log filters."""
+        self.log_level_filter.set("All")
+        self.log_search_entry.delete(0, tk.END)
+        self.apply_log_filters()
+
+    def clear_complete_logs(self):
+        """Clear the complete log display."""
+        if messagebox.askyesno("Clear Logs", "Are you sure you want to clear all logs?"):
+            self.complete_log_text.config(state=tk.NORMAL)
+            self.complete_log_text.delete("1.0", tk.END)
+            self.complete_log_text.config(state=tk.DISABLED)
+            status_manager.add_log("Logs cleared from display", "INFO")
+
+    def refresh_complete_logs(self):
+        """Refresh the complete log display."""
+        self.apply_log_filters()
+
+    def export_logs(self):
+        """Export logs to a text file."""
+        try:
+            # File dialog
+            filepath = filedialog.asksaveasfilename(
+                title="Export Logs",
+                defaultextension=".txt",
+                filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+            )
+
+            if not filepath:
+                return  # User cancelled
+
+            # Get all logs
+            status = status_manager.get_status()
+            all_logs = status['recent_logs']
+
+            # Write to file
+            with open(filepath, 'w', encoding='utf-8') as f:
+                f.write("SICAL Gastos Robot - Complete Logs\n")
+                f.write("=" * 80 + "\n\n")
+                for log in all_logs:
+                    f.write(log + "\n")
+
+            messagebox.showinfo("Success", f"Logs exported successfully to:\n{filepath}")
+            status_manager.add_log(f"Logs exported to {filepath}", "INFO")
+
+        except Exception as e:
+            status_manager.add_log(f"Failed to export logs: {e}", "ERROR")
+            messagebox.showerror("Error", f"Failed to export logs:\n{e}")
+
     def create_status_panel(self, parent):
         """Create the service status panel."""
         status_frame = ttk.LabelFrame(parent, text="Service Status", padding="10")
@@ -526,6 +771,25 @@ class GastosGUI:
         )
         self.step_label = ttk.Label(task_frame, text="--", wraplength=600, foreground="blue")
         self.step_label.grid(row=10, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Separator
+        ttk.Separator(task_frame, orient='horizontal').grid(
+            row=11, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=8
+        )
+
+        # Row 12: Duplicate Policy (bold label)
+        ttk.Label(task_frame, text="Duplicate Policy:", font=("Segoe UI", 9, "bold")).grid(
+            row=12, column=0, sticky=tk.W
+        )
+        self.policy_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 9))
+        self.policy_label.grid(row=12, column=1, sticky=tk.W, columnspan=3, padx=5)
+
+        # Row 13: Confirmation Token
+        ttk.Label(task_frame, text="Token:", font=("Segoe UI", 9, "bold")).grid(
+            row=13, column=0, sticky=tk.W
+        )
+        self.token_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 9), wraplength=600)
+        self.token_label.grid(row=13, column=1, sticky=tk.W, columnspan=3, padx=5)
 
     def create_control_panel(self, parent):
         """Create the control buttons panel."""
@@ -827,23 +1091,129 @@ class GastosGUI:
 
             step = current_task['current_step'] or "Processing..."
             self.step_label.config(text=step)
+
+            # Display policy and token information
+            policy = current_task.get('duplicate_policy', 'abort_on_duplicate')
+            if policy:
+                policy_display = policy.replace('_', ' ').title()
+                # Color code based on policy type
+                policy_color = "black"
+                if policy == 'check_only':
+                    policy_color = "blue"
+                elif policy == 'force_create':
+                    policy_color = "orange"
+                elif policy == 'abort_on_duplicate':
+                    policy_color = "red"
+                self.policy_label.config(text=policy_display, foreground=policy_color)
+            else:
+                self.policy_label.config(text="Abort On Duplicate (default)", foreground="red")
+
+            # Display token with status color coding
+            token = current_task.get('duplicate_confirmation_token')
+            token_status = current_task.get('token_status', 'none')
+            if token:
+                # Truncate token for display
+                token_display = f"{token[:16]}...{token[-8:]}" if len(token) > 32 else token
+                token_display += f" [{token_status.upper()}]"
+
+                # Color code based on token status
+                token_color = "gray"
+                if token_status == 'received':
+                    token_color = "orange"  # Pending
+                elif token_status == 'validated':
+                    token_color = "blue"    # Validated
+                elif token_status == 'processing':
+                    token_color = "green"   # Processing
+                elif token_status == 'finalized':
+                    token_color = "gray"    # Completed
+
+                self.token_label.config(text=token_display, foreground=token_color)
+            else:
+                self.token_label.config(text="No token (N/A)", foreground="gray")
         else:
-            self.current_task_label.config(
-                text="No task currently processing",
-                foreground="gray"
-            )
-            self.operation_type_label.config(text="--")
-            self.operation_label.config(text="--")
-            self.date_label.config(text="--")
-            self.duration_label.config(text="--")
-            self.cash_register_label.config(text="--")
-            self.amount_label.config(text="--")
-            self.nature_label.config(text="--")
-            self.third_party_label.config(text="--")
-            self.description_label.config(text="--")
-            self.line_items_label.config(text="--")
-            self.line_item_details_label.config(text="--")
-            self.step_label.config(text="--")
+            # Check if there's a last completed task to display
+            last_completed = status.get('last_completed_task')
+            if last_completed:
+                # Show last completed task info in a muted style
+                task_id = last_completed['task_id'][:16] + "..." if len(last_completed['task_id']) > 16 else last_completed['task_id']
+                completion_status = last_completed.get('completion_status', 'COMPLETED')
+                self.current_task_label.config(
+                    text=f"Last: {task_id} - {completion_status}",
+                    foreground="gray"
+                )
+
+                # Show basic info from last task
+                operation_type = (last_completed['operation_type'] or 'unknown').upper()
+                self.operation_type_label.config(text=operation_type)
+
+                operation = last_completed['operation_number'] or "--"
+                self.operation_label.config(text=operation)
+
+                date = last_completed.get('date') or "--"
+                self.date_label.config(text=date)
+
+                self.duration_label.config(text="--")
+
+                cash_register = last_completed.get('cash_register') or "--"
+                self.cash_register_label.config(text=cash_register)
+
+                amount = last_completed['amount']
+                if amount is not None:
+                    self.amount_label.config(text=f"€{amount:.2f}")
+                else:
+                    self.amount_label.config(text="--")
+
+                nature_display = last_completed.get('nature_display') or "--"
+                self.nature_label.config(text=nature_display)
+
+                third_party = last_completed.get('third_party') or "--"
+                self.third_party_label.config(text=third_party)
+
+                description = last_completed.get('description') or "--"
+                self.description_label.config(text=description)
+
+                total_items = last_completed.get('total_line_items', 0)
+                self.line_items_label.config(text=f"{total_items} items")
+
+                self.line_item_details_label.config(text="--")
+                self.step_label.config(text=f"{completion_status}")
+
+                # Display retained policy and token info
+                policy = last_completed.get('duplicate_policy')
+                if policy:
+                    policy_display = policy.replace('_', ' ').title()
+                    self.policy_label.config(text=policy_display + " (Last task)", foreground="gray")
+                else:
+                    self.policy_label.config(text="--", foreground="gray")
+
+                token = last_completed.get('duplicate_confirmation_token')
+                token_status = last_completed.get('token_status', 'finalized')
+                if token:
+                    token_display = f"{token[:16]}...{token[-8:]}" if len(token) > 32 else token
+                    token_display += f" [{token_status.upper()}]"
+                    self.token_label.config(text=token_display, foreground="gray")
+                else:
+                    self.token_label.config(text="No token (Last task)", foreground="gray")
+            else:
+                # No current task and no last completed task
+                self.current_task_label.config(
+                    text="No task currently processing",
+                    foreground="gray"
+                )
+                self.operation_type_label.config(text="--")
+                self.operation_label.config(text="--")
+                self.date_label.config(text="--")
+                self.duration_label.config(text="--")
+                self.cash_register_label.config(text="--")
+                self.amount_label.config(text="--")
+                self.nature_label.config(text="--")
+                self.third_party_label.config(text="--")
+                self.description_label.config(text="--")
+                self.line_items_label.config(text="--")
+                self.line_item_details_label.config(text="--")
+                self.step_label.config(text="--")
+                self.policy_label.config(text="--", foreground="gray")
+                self.token_label.config(text="--", foreground="gray")
 
         # Update logs
         recent_logs = status['recent_logs']
@@ -872,6 +1242,14 @@ class GastosGUI:
                 # Auto-scroll to bottom
                 self.log_text.see(tk.END)
                 self.log_text.config(state=tk.DISABLED)
+
+        # Update complete logs tab if it exists
+        if hasattr(self, 'complete_log_text'):
+            # Only update if the logs tab is visible or auto-refresh is needed
+            try:
+                self.refresh_complete_logs()
+            except Exception:
+                pass  # Ignore errors during refresh
 
         # Schedule next update (500ms)
         self.root.after(500, self.update_display)
