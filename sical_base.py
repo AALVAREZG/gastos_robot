@@ -415,6 +415,14 @@ class SicalOperationProcessor(ABC):
 
                 self.logger.info('force_create validated - proceeding to open window')
 
+                # BUGFIX: Add extra wait time for force_create operations
+                # SICAL needs more time to prepare when creating operations with known duplicates
+                import time
+                from sical_constants import DEFAULT_TIMING
+                extra_wait = DEFAULT_TIMING['force_create_wait']
+                self.logger.info(f'force_create: Adding {extra_wait}s extra wait before opening window')
+                time.sleep(extra_wait)
+
             # Phase 2: Setup SICAL window (ONLY if no duplicates or force_create validated)
             self.notify_step(f'Opening {self.operation_name} window')
             if not self.setup_operation_window():

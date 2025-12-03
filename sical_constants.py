@@ -220,6 +220,7 @@ DEFAULT_TIMING = {
     'medium_wait': 0.5,
     'long_wait': 1.0,
     'extra_long_wait': 2.0,
+    'force_create_wait': 3.0,  # Extra wait for force_create operations
     'key_interval': 0.05,
     'slow_key_interval': 0.1,
 }
