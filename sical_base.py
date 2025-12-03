@@ -258,7 +258,8 @@ class SicalOperationProcessor(ABC):
     def check_for_duplicates_pre_window(
         self,
         operation_data: Dict[str, Any],
-        result: OperationResult
+        result: OperationResult,
+        original_data: Optional[Dict[str, Any]] = None
     ) -> OperationResult:
         """
         Check for duplicates BEFORE opening the main operation window.
@@ -268,8 +269,9 @@ class SicalOperationProcessor(ABC):
         before setup_operation_window().
 
         Args:
-            operation_data: Prepared SICAL-compatible operation data
+            operation_data: Prepared SICAL-compatible operation data (transformed)
             result: Current operation result object
+            original_data: ORIGINAL untransformed operation data (for token generation)
 
         Returns:
             Updated operation result (may set status to P_DUPLICATED or FAILED)
@@ -389,7 +391,9 @@ class SicalOperationProcessor(ABC):
 
             if duplicate_policy in ('check_only', 'abort_on_duplicate'):
                 self.notify_step('Checking for duplicates')
-                result = self.check_for_duplicates_pre_window(sical_data, result)
+                # Pass ORIGINAL operation_data for token generation (must match Phase 2 validation)
+                # But duplicate check uses transformed sical_data for SICAL field matching
+                result = self.check_for_duplicates_pre_window(sical_data, result, original_data=operation_data)
 
                 # Early exit if check-only mode (regardless of duplicate status)
                 if duplicate_policy == 'check_only':
@@ -406,8 +410,10 @@ class SicalOperationProcessor(ABC):
 
             elif duplicate_policy == 'force_create':
                 # Validate token BEFORE opening window
+                # CRITICAL: Use ORIGINAL operation_data for token validation, not transformed sical_data
+                # The token was created with hash of original data, so validation must use same format
                 self.notify_step('Validating force_create security token')
-                result = self._validate_force_create_token(sical_data, result)
+                result = self._validate_force_create_token(operation_data, result)
 
                 if result.status == OperationStatus.FAILED:
                     self.logger.error('Token validation failed - aborting without opening window')
