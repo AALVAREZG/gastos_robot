@@ -9,7 +9,7 @@ TODO: Configure actual PMP450 paths when SICAL access is available.
 
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from datetime import datetime
 from robocorp import windows
 
