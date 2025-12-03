@@ -241,6 +241,14 @@ class GastoConsumer:
             operation_wrapper = data.get('operation_data', {}).get('operation', {})
             operation_type = operation_wrapper.get('tipo', 'unknown')
             operation_data = operation_wrapper.get('detalle', {})
+
+            # BUGFIX: Merge duplicate policy fields from wrapper level if present
+            # Some producers may send these at operation_data level instead of detalle
+            wrapper_data = data.get('operation_data', {})
+            for policy_field in ('duplicate_policy', 'duplicate_confirmation_token', 'duplicate_check_id'):
+                if policy_field in wrapper_data and policy_field not in operation_data:
+                    operation_data[policy_field] = wrapper_data[policy_field]
+                    self.logger.debug(f'Merged {policy_field} from wrapper level: {wrapper_data[policy_field]}')
         elif 'tipo' in data and 'detalle' in data:
             # Direct v2 format
             self.logger.debug('Processing direct v2 message format')
