@@ -152,6 +152,13 @@ class GastoConsumer:
             task_id = data.get('task_id', properties.correlation_id)
             operation_type, operation_data = self._extract_operation_data(data)
 
+            # BUGFIX: Merge duplicate policy fields from top-level message if present
+            # Producer may send these at message root level
+            for policy_field in ('duplicate_policy', 'duplicate_confirmation_token', 'duplicate_check_id'):
+                if policy_field in data and policy_field not in operation_data:
+                    operation_data[policy_field] = data[policy_field]
+                    self.logger.info(f'Merged {policy_field} from message root: {data[policy_field]}')
+
             # Notify GUI of task received
             if self.status_callback:
                 self.status_callback(GUI_EVENTS['task_received'], task_id=task_id)
