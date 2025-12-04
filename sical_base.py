@@ -398,18 +398,18 @@ class SicalOperationProcessor(ABC):
                 # But duplicate check uses transformed sical_data for SICAL field matching
                 result = self.check_for_duplicates_pre_window(sical_data, result, original_data=operation_data)
 
-                # Early exit if check-only mode (regardless of duplicate status)
-                if duplicate_policy == 'check_only':
-                    self.logger.info('Check-only mode - returning without opening window')
-                    return result
-
-                # Early exit if duplicates found in abort mode
-                if result.status == OperationStatus.P_DUPLICATED and duplicate_policy == 'abort_on_duplicate':
-                    self.logger.info(f'Duplicate detected - aborting without opening {self.operation_name} window')
+                # Early exit if duplicates found (for both check_only and abort_on_duplicate)
+                if result.status == OperationStatus.P_DUPLICATED:
+                    if duplicate_policy == 'check_only':
+                        self.logger.info('Check-only mode: duplicates found - returning P_DUPLICATED with token')
+                    else:
+                        self.logger.info(f'Duplicate detected - aborting without opening {self.operation_name} window')
                     return result
 
                 # If we reach here, no duplicates found - continue to window opening
-                self.logger.info('No duplicates found - proceeding to open window')
+                # For check_only: this means we proceed to create the operation (desired workflow)
+                # For abort_on_duplicate: same behavior as before
+                self.logger.info(f'No duplicates found (policy: {duplicate_policy}) - proceeding to open window')
 
             elif duplicate_policy == 'force_create':
                 # Validate token BEFORE opening window
