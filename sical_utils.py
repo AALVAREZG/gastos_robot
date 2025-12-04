@@ -43,25 +43,98 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
 
     # Expand each menu item in the path except the last one
     for element_name in menu_path[:-1]:
-        try:
-            element = app.find(
-                f'control:"TreeItemControl" and name:"{element_name}"',
-                timeout=DEFAULT_TIMING['short_wait']
-            )
-            element.send_keys(keys='{ADD}', wait_time=DEFAULT_TIMING['short_wait'])
-        except Exception as e:
-            operation_logger.error(f'Failed to expand menu item "{element_name}": {e}')
-            return False
+        max_retries = 2
+        for attempt in range(max_retries):
+            try:
+                # Re-find the main window on each attempt to get fresh handles
+                if attempt > 0:
+                    operation_logger.debug(f'Retry {attempt} for menu item "{element_name}"')
+                    time.sleep(DEFAULT_TIMING['medium_wait'])
+                    app = windows.find_window(SICAL_WINDOWS['main_menu'], raise_error=False)
+                    if not app:
+                        operation_logger.error('SICAL main menu lost during navigation')
+                        return False
+
+                element = app.find(
+                    f'control:"TreeItemControl" and name:"{element_name}"',
+                    timeout=DEFAULT_TIMING['short_wait']
+                )
+                element.send_keys(keys='{ADD}', wait_time=DEFAULT_TIMING['short_wait'])
+                break  # Success, exit retry loop
+            except AttributeError as e:
+                # Handle the specific __handle error
+                if '__handle' in str(e):
+                    if attempt < max_retries - 1:
+                        operation_logger.warning(f'UI handle lost for "{element_name}", retrying...')
+                        continue
+                    else:
+                        operation_logger.error(f'CRITICAL: UI handle broken after {max_retries} retries for "{element_name}"')
+                        operation_logger.error('=' * 80)
+                        operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                        operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                        operation_logger.error('=' * 80)
+                        return False
+                operation_logger.error(f'Failed to expand menu item "{element_name}": {e}')
+                return False
+            except Exception as e:
+                error_msg = str(e)
+                # Check for COM event error
+                if 'no pudo invocar' in error_msg or '-2147220991' in error_msg:
+                    operation_logger.error(f'COM event error: {e}')
+                    operation_logger.error('=' * 80)
+                    operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                    operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                    operation_logger.error('=' * 80)
+                    return False
+                operation_logger.error(f'Failed to expand menu item "{element_name}": {e}')
+                return False
 
     # Double-click on the last item to open the window
-    try:
-        last_element_name = menu_path[-1]
-        app.find(f'control:"TreeItemControl" and name:"{last_element_name}"').double_click()
-        operation_logger.debug(f'Opened menu option: {last_element_name}')
-        return True
-    except Exception as e:
-        operation_logger.error(f'Failed to open menu option "{menu_path[-1]}": {e}')
-        return False
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            # Re-find the main window for final step
+            if attempt > 0:
+                operation_logger.debug(f'Retry {attempt} for final menu option')
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                app = windows.find_window(SICAL_WINDOWS['main_menu'], raise_error=False)
+                if not app:
+                    operation_logger.error('SICAL main menu lost during final navigation')
+                    return False
+
+            last_element_name = menu_path[-1]
+            app.find(f'control:"TreeItemControl" and name:"{last_element_name}"').double_click()
+            operation_logger.debug(f'Opened menu option: {last_element_name}')
+            return True
+        except AttributeError as e:
+            # Handle the specific __handle error
+            if '__handle' in str(e):
+                if attempt < max_retries - 1:
+                    operation_logger.warning(f'UI handle lost for final option "{last_element_name}", retrying...')
+                    continue
+                else:
+                    operation_logger.error(f'CRITICAL: UI handle broken after {max_retries} retries for final menu')
+                    operation_logger.error('=' * 80)
+                    operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                    operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                    operation_logger.error('=' * 80)
+                    return False
+            operation_logger.error(f'Failed to open menu option "{menu_path[-1]}": {e}')
+            return False
+        except Exception as e:
+            error_msg = str(e)
+            # Check for COM event error
+            if 'no pudo invocar' in error_msg or '-2147220991' in error_msg:
+                operation_logger.error(f'COM event error: {e}')
+                operation_logger.error('=' * 80)
+                operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                operation_logger.error('=' * 80)
+                return False
+            operation_logger.error(f'Failed to open menu option "{menu_path[-1]}": {e}')
+            return False
+
+    return False
 
 
 def collapse_all_menu_items(operation_logger: logging.Logger) -> None:

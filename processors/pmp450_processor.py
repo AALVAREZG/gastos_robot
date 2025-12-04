@@ -9,7 +9,7 @@ TODO: Configure actual PMP450 paths when SICAL access is available.
 
 import time
 import logging
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 from datetime import datetime
 from robocorp import windows
 
@@ -199,7 +199,8 @@ class PMP450Processor(SicalOperationProcessor):
     def check_for_duplicates_pre_window(
         self,
         operation_data: Dict[str, Any],
-        result: OperationResult
+        result: OperationResult,
+        original_data: Optional[Dict[str, Any]] = None
     ) -> OperationResult:
         """
         Check for duplicates BEFORE opening PMP450 window.
@@ -208,13 +209,14 @@ class PMP450Processor(SicalOperationProcessor):
         allowing us to avoid opening the PMP450 window if duplicates are found.
 
         Args:
-            operation_data: Prepared SICAL-compatible operation data
+            operation_data: Prepared SICAL-compatible operation data (transformed)
             result: Current operation result object
+            original_data: ORIGINAL untransformed operation data (for token generation)
 
         Returns:
             Updated operation result (may set status to P_DUPLICATED)
         """
-        return self._check_for_duplicates(operation_data, result)
+        return self._check_for_duplicates(operation_data, result, original_data=original_data)
 
     def process_operation_form(
         self,
@@ -277,7 +279,8 @@ class PMP450Processor(SicalOperationProcessor):
     def _check_for_duplicates(
         self,
         operation_data: Dict[str, Any],
-        result: OperationResult
+        result: OperationResult,
+        original_data: Optional[Dict[str, Any]] = None
     ) -> OperationResult:
         """
         Check for duplicate operations using the Consulta window.
@@ -285,9 +288,13 @@ class PMP450Processor(SicalOperationProcessor):
         This method now returns detailed duplicate information and generates
         confirmation tokens for force_create operations.
 
+        IMPORTANT: Uses original_data for token generation to ensure hash consistency
+        between Phase 1 (check_only) and Phase 2 (force_create).
+
         Args:
-            operation_data: Operation data to search for
+            operation_data: Operation data to search for (transformed)
             result: Current operation result
+            original_data: ORIGINAL untransformed operation data (for token generation)
 
         Returns:
             Updated operation result with duplicate details and token (if duplicates found)
@@ -350,9 +357,11 @@ class PMP450Processor(SicalOperationProcessor):
                 # This requires knowledge of the SICAL grid structure
                 result.duplicate_details = []  # Placeholder for detailed extraction
 
-                # Generate confirmation token
+                # Generate confirmation token using ORIGINAL data (not transformed)
+                # This ensures hash consistency with Phase 2 validation
                 confirmation_manager = get_confirmation_manager()
-                token_id, expires_at = confirmation_manager.generate_token(operation_data)
+                token_data = original_data if original_data is not None else operation_data
+                token_id, expires_at = confirmation_manager.generate_token(token_data)
 
                 result.duplicate_confirmation_token = token_id
                 result.duplicate_token_expires_at = expires_at

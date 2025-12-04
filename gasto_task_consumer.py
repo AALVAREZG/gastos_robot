@@ -152,6 +152,13 @@ class GastoConsumer:
             task_id = data.get('task_id', properties.correlation_id)
             operation_type, operation_data = self._extract_operation_data(data)
 
+            # BUGFIX: Merge duplicate policy fields from top-level message if present
+            # Producer may send these at message root level
+            for policy_field in ('duplicate_policy', 'duplicate_confirmation_token', 'duplicate_check_id'):
+                if policy_field in data and policy_field not in operation_data:
+                    operation_data[policy_field] = data[policy_field]
+                    self.logger.info(f'Merged {policy_field} from message root: {data[policy_field]}')
+
             # Notify GUI of task received
             if self.status_callback:
                 self.status_callback(GUI_EVENTS['task_received'], task_id=task_id)
@@ -241,6 +248,14 @@ class GastoConsumer:
             operation_wrapper = data.get('operation_data', {}).get('operation', {})
             operation_type = operation_wrapper.get('tipo', 'unknown')
             operation_data = operation_wrapper.get('detalle', {})
+
+            # BUGFIX: Merge duplicate policy fields from wrapper level if present
+            # Some producers may send these at operation_data level instead of detalle
+            wrapper_data = data.get('operation_data', {})
+            for policy_field in ('duplicate_policy', 'duplicate_confirmation_token', 'duplicate_check_id'):
+                if policy_field in wrapper_data and policy_field not in operation_data:
+                    operation_data[policy_field] = wrapper_data[policy_field]
+                    self.logger.debug(f'Merged {policy_field} from wrapper level: {wrapper_data[policy_field]}')
         elif 'tipo' in data and 'detalle' in data:
             # Direct v2 format
             self.logger.debug('Processing direct v2 message format')
