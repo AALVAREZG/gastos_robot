@@ -59,16 +59,39 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
                     f'control:"TreeItemControl" and name:"{element_name}"',
                     timeout=DEFAULT_TIMING['short_wait']
                 )
-                element.send_keys(keys='{ADD}', wait_time=DEFAULT_TIMING['short_wait'])
+
+                # BUGFIX: Use click() instead of send_keys() to expand tree items
+                # send_keys() has a bug where it tries to access element.__handle which doesn't exist
+                # Clicking on tree items typically expands them in most UI frameworks
+                operation_logger.debug(f'Expanding menu item "{element_name}" using click()')
+                element.click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])  # Wait for expansion animation
                 break  # Success, exit retry loop
             except AttributeError as e:
                 # Handle the specific __handle error
-                if '__handle' in str(e) and attempt < max_retries - 1:
-                    operation_logger.warning(f'UI handle lost for "{element_name}", retrying...')
-                    continue
+                if '__handle' in str(e):
+                    if attempt < max_retries - 1:
+                        operation_logger.warning(f'UI handle lost for "{element_name}", retrying...')
+                        continue
+                    else:
+                        operation_logger.error(f'CRITICAL: UI handle broken after {max_retries} retries for "{element_name}"')
+                        operation_logger.error('=' * 80)
+                        operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                        operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                        operation_logger.error('=' * 80)
+                        return False
                 operation_logger.error(f'Failed to expand menu item "{element_name}": {e}')
                 return False
             except Exception as e:
+                error_msg = str(e)
+                # Check for COM event error
+                if 'no pudo invocar' in error_msg or '-2147220991' in error_msg:
+                    operation_logger.error(f'COM event error: {e}')
+                    operation_logger.error('=' * 80)
+                    operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                    operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                    operation_logger.error('=' * 80)
+                    return False
                 operation_logger.error(f'Failed to expand menu item "{element_name}": {e}')
                 return False
 
@@ -91,12 +114,29 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
             return True
         except AttributeError as e:
             # Handle the specific __handle error
-            if '__handle' in str(e) and attempt < max_retries - 1:
-                operation_logger.warning(f'UI handle lost for final option "{last_element_name}", retrying...')
-                continue
+            if '__handle' in str(e):
+                if attempt < max_retries - 1:
+                    operation_logger.warning(f'UI handle lost for final option "{last_element_name}", retrying...')
+                    continue
+                else:
+                    operation_logger.error(f'CRITICAL: UI handle broken after {max_retries} retries for final menu')
+                    operation_logger.error('=' * 80)
+                    operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                    operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                    operation_logger.error('=' * 80)
+                    return False
             operation_logger.error(f'Failed to open menu option "{menu_path[-1]}": {e}')
             return False
         except Exception as e:
+            error_msg = str(e)
+            # Check for COM event error
+            if 'no pudo invocar' in error_msg or '-2147220991' in error_msg:
+                operation_logger.error(f'COM event error: {e}')
+                operation_logger.error('=' * 80)
+                operation_logger.error('SICAL COM STATE IS CORRUPTED')
+                operation_logger.error('ACTION REQUIRED: Close SICAL completely and restart it')
+                operation_logger.error('=' * 80)
+                return False
             operation_logger.error(f'Failed to open menu option "{menu_path[-1]}": {e}')
             return False
 
@@ -121,7 +161,10 @@ def collapse_all_menu_items(operation_logger: logging.Logger) -> None:
                     search_depth=2,
                     timeout=DEFAULT_TIMING['short_wait']
                 )
-                element.send_keys(keys='{SUBTRACT}', wait_time=DEFAULT_TIMING['short_wait'])
+                # BUGFIX: Use click() instead of send_keys() to avoid __handle error
+                # Clicking an expanded tree item typically collapses it
+                element.click()
+                time.sleep(DEFAULT_TIMING['short_wait'])
             except Exception:
                 # Element might not be found or already collapsed, continue
                 pass
