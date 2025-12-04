@@ -59,13 +59,7 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
                     f'control:"TreeItemControl" and name:"{element_name}"',
                     timeout=DEFAULT_TIMING['short_wait']
                 )
-
-                # BUGFIX: Use click() instead of send_keys() to expand tree items
-                # send_keys() has a bug where it tries to access element.__handle which doesn't exist
-                # Clicking on tree items typically expands them in most UI frameworks
-                operation_logger.debug(f'Expanding menu item "{element_name}" using click()')
-                element.click()
-                time.sleep(DEFAULT_TIMING['medium_wait'])  # Wait for expansion animation
+                element.send_keys(keys='{ADD}', wait_time=DEFAULT_TIMING['short_wait'])
                 break  # Success, exit retry loop
             except AttributeError as e:
                 # Handle the specific __handle error
@@ -161,10 +155,7 @@ def collapse_all_menu_items(operation_logger: logging.Logger) -> None:
                     search_depth=2,
                     timeout=DEFAULT_TIMING['short_wait']
                 )
-                # BUGFIX: Use click() instead of send_keys() to avoid __handle error
-                # Clicking an expanded tree item typically collapses it
-                element.click()
-                time.sleep(DEFAULT_TIMING['short_wait'])
+                element.send_keys(keys='{SUBTRACT}', wait_time=DEFAULT_TIMING['short_wait'])
             except Exception:
                 # Element might not be found or already collapsed, continue
                 pass
