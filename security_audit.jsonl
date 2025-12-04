@@ -1,0 +1,4 @@
+{"timestamp": "2025-12-03T09:37:29.085700", "action": "force_create_attempt", "token_valid": true, "tercero": "F91119065", "fecha": "25112025", "total_importe": 10.0, "token": "v51cblw579JVcu6O...", "error": null}
+{"timestamp": "2025-12-03T09:39:19.946416", "action": "force_create_attempt", "token_valid": true, "tercero": "F91119065", "fecha": "25112025", "total_importe": 10.0, "token": "0CeCxdessWHAclPJ...", "error": null}
+{"timestamp": "2025-12-03T09:50:44.305713", "action": "force_create_attempt", "token_valid": true, "tercero": "F91119065", "fecha": "25112025", "total_importe": 10.0, "token": "VM3VUtdCUgeqxjXz...", "error": null}
+{"timestamp": "2025-12-03T10:04:15.954009", "action": "force_create_attempt", "token_valid": true, "tercero": "F91119065", "fecha": "25112025", "total_importe": 10.0, "token": "d4yKE4jqt5p5RHJE...", "error": null}
