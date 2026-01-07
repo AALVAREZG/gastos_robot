@@ -212,7 +212,7 @@ class PMP450Processor(SicalOperationProcessor):
 
         # Validate fecha format
         if not self._validate_date_format(operation_data['fecha']):
-            raise ValueError(f"Invalid date format: {operation_data['fecha']}. Expected DD/MM/YYYY")
+            raise ValueError(f"Invalid date format: {operation_data['fecha']}. Expected DD/MM/YYYY or DDMMYYYY")
 
         # Validate tercero format
         if not self._validate_tercero(operation_data['tercero']):
@@ -228,7 +228,7 @@ class PMP450Processor(SicalOperationProcessor):
 
     def _validate_date_format(self, fecha: str) -> bool:
         """
-        Validate date is in DD/MM/YYYY format.
+        Validate date is in DD/MM/YYYY or DDMMYYYY format.
 
         Args:
             fecha: Date string to validate
@@ -239,16 +239,27 @@ class PMP450Processor(SicalOperationProcessor):
         if not fecha:
             return False
 
-        pattern = r'^\d{2}/\d{2}/\d{4}$'
-        if not re.match(pattern, fecha):
-            return False
+        # Pattern with slashes: DD/MM/YYYY
+        pattern_with_slashes = r'^\d{2}/\d{2}/\d{4}$'
+        # Pattern without slashes: DDMMYYYY
+        pattern_without_slashes = r'^\d{8}$'
 
-        # Additional validation: check if date is valid
-        try:
-            datetime.strptime(fecha, '%d/%m/%Y')
-            return True
-        except ValueError:
-            return False
+        if re.match(pattern_with_slashes, fecha):
+            # Validate actual date with slashes
+            try:
+                datetime.strptime(fecha, '%d/%m/%Y')
+                return True
+            except ValueError:
+                return False
+        elif re.match(pattern_without_slashes, fecha):
+            # Validate actual date without slashes
+            try:
+                datetime.strptime(fecha, '%d%m%Y')
+                return True
+            except ValueError:
+                return False
+
+        return False
 
     def _validate_tercero(self, tercero: str) -> bool:
         """
