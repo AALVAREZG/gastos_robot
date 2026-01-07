@@ -406,9 +406,14 @@ class SicalOperationProcessor(ABC):
                         self.logger.info(f'Duplicate detected - aborting without opening {self.operation_name} window')
                     return result
 
-                # If we reach here, no duplicates found - continue to window opening
-                # For check_only: this means we proceed to create the operation (desired workflow)
-                # For abort_on_duplicate: same behavior as before
+                # Early exit for check_only mode when no duplicates found
+                # check_only should never proceed to create operation - it only checks
+                if duplicate_policy == 'check_only' and result.status == OperationStatus.COMPLETED:
+                    self.logger.info('Check-only mode: no duplicates found - returning COMPLETED without creating operation')
+                    return result
+
+                # If we reach here, no duplicates found and policy is abort_on_duplicate
+                # Continue to window opening and operation creation
                 self.logger.info(f'No duplicates found (policy: {duplicate_policy}) - proceeding to open window')
 
             elif duplicate_policy == 'force_create':

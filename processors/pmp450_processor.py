@@ -4,9 +4,10 @@ PMP450 Processor - Handles PMP450 (Gasto) operations in SICAL.
 This processor implements the workflow for PMP450 expense operations.
 It mirrors the ADO220 processor structure but uses PMP450-specific constants.
 
-TODO: Configure actual PMP450 paths when SICAL access is available.
+See CONSUMER_PMP450_PROCESSING_GUIDE.md for detailed processing specifications.
 """
 
+import re
 import time
 import logging
 from typing import Any, Dict, Optional
@@ -90,12 +91,25 @@ class PMP450Processor(SicalOperationProcessor):
         """
         Transform operation data from v2 message format into SICAL-compatible format.
 
+        Transformations:
+        - fecha: DD/MM/YYYY → DDMMYYYY
+        - texto_sical: array → string (extract texto_ado)
+        - caja: "CODE_BANKNAME - NUMBER" → "CODE"
+        - _FIN flag: detect and set finalizar_operacion
+        - aplicaciones: transform to SICAL format
+
         Args:
             operation_data: Operation data from RabbitMQ message (v2 format)
 
         Returns:
             Transformed data compatible with SICAL processing functions
+
+        Raises:
+            ValueError: If validation fails
         """
+        # Validate input before transformation
+        self.validate_input(operation_data)
+
         # Extract texto field from texto_sical array
         texto_sical = operation_data.get('texto_sical', [])
         if texto_sical and len(texto_sical) > 0:
@@ -176,6 +190,113 @@ class PMP450Processor(SicalOperationProcessor):
             aplicaciones.append(aplicacion_obj)
 
         return aplicaciones
+
+    def validate_input(self, operation_data: Dict[str, Any]) -> None:
+        """
+        Validate required fields in operation data.
+
+        This method validates all required fields before processing, ensuring
+        data integrity before any SICAL window operations begin.
+
+        Args:
+            operation_data: Operation data from RabbitMQ message
+
+        Raises:
+            ValueError: If any required field is missing or invalid
+        """
+        required_fields = ['fecha', 'tercero', 'caja', 'texto_sical', 'aplicaciones']
+
+        for field in required_fields:
+            if field not in operation_data or operation_data[field] is None:
+                raise ValueError(f"Missing required field: {field}")
+
+        # Validate fecha format
+        if not self._validate_date_format(operation_data['fecha']):
+            raise ValueError(f"Invalid date format: {operation_data['fecha']}. Expected DD/MM/YYYY")
+
+        # Validate tercero format
+        if not self._validate_tercero(operation_data['tercero']):
+            raise ValueError(f"Invalid tercero format: {operation_data['tercero']}. Must be 9 characters (letter + 8 digits or 8 digits + letter)")
+
+        # Validate aplicaciones
+        if not operation_data['aplicaciones'] or len(operation_data['aplicaciones']) == 0:
+            raise ValueError("At least one aplicación is required")
+
+        # Validate each aplicación
+        for i, aplicacion in enumerate(operation_data['aplicaciones']):
+            self._validate_aplicacion(aplicacion, i)
+
+    def _validate_date_format(self, fecha: str) -> bool:
+        """
+        Validate date is in DD/MM/YYYY format.
+
+        Args:
+            fecha: Date string to validate
+
+        Returns:
+            True if date format is valid, False otherwise
+        """
+        if not fecha:
+            return False
+
+        pattern = r'^\d{2}/\d{2}/\d{4}$'
+        if not re.match(pattern, fecha):
+            return False
+
+        # Additional validation: check if date is valid
+        try:
+            datetime.strptime(fecha, '%d/%m/%Y')
+            return True
+        except ValueError:
+            return False
+
+    def _validate_tercero(self, tercero: str) -> bool:
+        """
+        Validate tercero is exactly 9 characters with correct format.
+
+        Valid formats:
+        - Letter + 8 digits (e.g., P12345678)
+        - 8 digits + Letter (e.g., 12345678A)
+
+        Args:
+            tercero: Tercero identifier to validate
+
+        Returns:
+            True if tercero format is valid, False otherwise
+        """
+        if not tercero or len(tercero) != 9:
+            return False
+
+        # Pattern: Letter + 8 digits OR 8 digits + Letter
+        pattern1 = r'^[A-Z][0-9]{8}$'
+        pattern2 = r'^[0-9]{8}[A-Z]$'
+
+        return bool(re.match(pattern1, tercero) or re.match(pattern2, tercero))
+
+    def _validate_aplicacion(self, aplicacion: Dict, index: int) -> None:
+        """
+        Validate aplicación fields.
+
+        Args:
+            aplicacion: Aplicación data dictionary
+            index: Index of the aplicación for error messages
+
+        Raises:
+            ValueError: If any required field is missing or invalid
+        """
+        required = ['year', 'funcional', 'economica', 'importe']
+
+        for field in required:
+            if field not in aplicacion or aplicacion[field] is None:
+                raise ValueError(f"Aplicación {index}: Missing required field '{field}'")
+
+        # Validate importe is a valid number
+        try:
+            importe = float(aplicacion['importe'])
+            if importe <= 0:
+                raise ValueError(f"Aplicación {index}: importe must be greater than 0")
+        except (ValueError, TypeError):
+            raise ValueError(f"Aplicación {index}: Invalid importe value '{aplicacion['importe']}'")
 
     def setup_operation_window(self) -> bool:
         """
@@ -382,7 +503,7 @@ class PMP450Processor(SicalOperationProcessor):
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
 
             else:
-                # No records found - safe to proceed
+                # No records found
                 result.similiar_records_encountered = 0
                 result.duplicate_details = []
                 result.duplicate_check_metadata = {
@@ -391,7 +512,14 @@ class PMP450Processor(SicalOperationProcessor):
                     'search_criteria': search_criteria
                 }
 
-                self.logger.info('No similar records found - proceeding with operation')
+                # Handle check_only policy: return COMPLETED without creating operation
+                if duplicate_policy == 'check_only':
+                    self.logger.info('check_only mode: No duplicates found - returning COMPLETED without creating operation')
+                    result.status = OperationStatus.COMPLETED
+                    result.end_time = datetime.now().isoformat()
+                else:
+                    self.logger.info('No similar records found - proceeding with operation')
+
                 filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
                 time.sleep(DEFAULT_TIMING['short_wait'])
