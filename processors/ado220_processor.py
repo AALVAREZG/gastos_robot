@@ -529,7 +529,14 @@ class ADO220Processor(SicalOperationProcessor):
             ventana.find(ADO220_FORM_PATHS['nuevo_button']).click()
             modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'], raise_error=True)
             modal_confirm.find(COMMON_DIALOG_PATHS['confirm_ok']).click()
+            # Check for select anuality on year-start
+            anuanity_select = ventana.find('class:"TDBComboBox" and path:"3|5|2"', timeout=0.3, raise_error=False)
 
+            if anuanity_select:
+                anuanity_select.click(wait_time=default_wait)
+                anuanity_select.send_keys(keys=operation_data['fecha'][-4:], wait_time=default_wait)
+                anuanity_select.send_keys(keys='{Enter}', wait_time=default_wait)
+            
             # Fill operation code
             cod_op_element = ventana.find(ADO220_FORM_PATHS['cod_operacion']).click(wait_time=default_wait)
             cod_op_element.send_keys(keys=OPERATION_CODES['ado220'], interval=0.05, wait_time=default_wait)

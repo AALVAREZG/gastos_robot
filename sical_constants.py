@@ -104,35 +104,36 @@ ADO220_FORM_PATHS = {
 
 PMP450_FORM_PATHS = {
     # Main panel elements - TODO: Update with actual paths
-    'cod_operacion': 'class:"TComboBox" and path:"3|5|1"',
-    'fecha': 'class:"TDBDateEdit" and path:"3|5|4|8"',
-    'expediente': 'class:"TDBEdit" and path:"3|5|4|7"',
-    'tercero': 'class:"TDBEdit" and path:"3|5|4|5"',
-    'tesoreria_check': 'class:"TDBCheckBox" and name:"Tesorería" and path:"3|5|4|3"',
+    'cod_operacion': 'class:"TComboBox" and path:"4|3|2|1"',
+    'fecha': 'class:"TDBDateEdit" and path:"4|3|5|6|1"',
+    'expediente': 'class:"TDBEdit" and path:"4|3|5|5|1"',
+    'tercero': 'class:"TDBEdit" and path:"4|3|5|5|1"',
+    'tesoreria_check': 'class:"TDBCheckBox" and name:"Tesorería"',
 
     # Payment form elements
-    'forma_pago_primary': 'class:"TDBEdit" and path:"3|5|4|9|3"',
+    'forma_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|4"',
     'forma_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|3"',
-    'tipo_pago_primary': 'class:"TDBEdit" and path:"3|5|4|9|2"',
+    'tipo_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|3"',
     'tipo_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|2"',
-    'caja_primary': 'class:"TDBEdit" and path:"3|5|4|9|1"',
+    'caja_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|1"',
     'caja_alternate': 'class:"TDBEdit" and path:"3|5|5|9|1"',
 
     # Text and aplicaciones
-    'texto': 'path:"3|1|1" and class:"TDBMemo"',
-    'aplicaciones_grid': 'path:"3|2|1|1"',
-    'new_line_button': 'class:"TBitBtn" and path:"3|3|3"',
-    'confirm_line_button': 'class:"TBitBtn" and path:"3|3|5"',
+    'texto': 'class:"TDBMemo" and path:"4|3|1|1"',
+    'aplicaciones_grid': 'path:"4|1|1|1"',
+    'new_line_button': 'class:"TBitBtn" and path:"4|2|1"',
+    'confirm_line_button': 'class:"TBitBtn" and path:"4|2|3"',
 
     # Action buttons
-    'nuevo_button': 'path:"2|3"',
-    'validar_button': 'name:"Validar" and path:"2|5"',
+    'nuevo_button': 'path:"3|4"',
+    'validar_button': 'class:"TBitBtn" and name:"Validar"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
 
     # Result fields
-    'num_operacion': 'class:"TEdit" and path:"3|5|3"',
-    'total_operacion': 'class:"TCurrencyEdit" and path:"3|6|6"',
+    'num_operacion': 'class:"TEdit" and path:"4|2|6|1"',
+    'total_operacion': 'class:"TCurrencyEdit" and path:"1|4"',
+    'liquido_operacion': 'class:"TCurrencyEdit" and path:"1|2"',
 }
 
 # =============================================================================
