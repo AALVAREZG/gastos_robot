@@ -14,7 +14,7 @@ from typing import Dict, Tuple
 SICAL_WINDOWS = {
     'main_menu': 'regex:.*FMenuSical',
     'ado220': 'regex:.*SICAL II 4.2 new30',
-    'pmp450': 'regex:.*SICAL II 4.2 new30',  # TODO: Update when PMP450 window pattern is known
+    'pmp450': 'regex:.*SICAL II 4.2 mona30',  # TODO: Update when PMP450 window pattern is known
     'consulta': 'regex:.*SICAL II 4.2 ConOpera',
     'tesoreria': 'regex:.*SICAL II 4.2 TesPagos',
     'filtros': 'regex:.*SICAL II 4.2 FilOpera',
@@ -31,7 +31,7 @@ SICAL_WINDOWS = {
 
 SICAL_MENU_PATHS = {
     'ado220': ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE'),
-    'pmp450': ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE'),  # TODO: Verify actual path for PMP450
+    'pmp450': ('OPERACIONES NO PRESUPUESTARIAS', 'PROPUESTAS DE MANDAMIENTOS DE PAGO'),  # TODO: Verify actual path for PMP450
     'consulta': ('CONSULTAS AVANZADAS', 'CONSULTA DE OPERACIONES'),
     'tesoreria_pagos': ('TESORERIA', 'GESTION DE PAGOS', 'PROCESO DE ORDENACION Y PAGO'),
     'arqueo': ('TESORERIA', 'GESTION DE COBROS', 'ARQUEOS. APLICACION DIRECTA',
@@ -216,7 +216,7 @@ COMMON_DIALOG_PATHS = {
 # =============================================================================
 
 DEFAULT_TIMING = {
-    'short_wait': 0.1,
+    'short_wait': 0.01,
     'default_wait': 0.2,
     'medium_wait': 0.5,
     'long_wait': 1.0,

@@ -183,7 +183,17 @@ def ordenar_y_pagar_operacion_gasto(ventana_proceso, datos_pago: Dict[str, Any],
                            result: OperationResult) -> OperationResult:
     
     try:
-        fecha_ordenpago_el = ventana_proceso.find('class:"TMaskEdit" and path:"2|1|1"')
+        # En el inicio del año, hasta el cierre del ejercicio anterior, hay que
+        # seleccionar el ejercicio de la fecha del ordenamiento/pago
+
+        #comprobar si aparece el combobox de selección de ejercicio
+        combo_ejercicio = ventana_proceso.find('class:"TComboBox" and path:"2|1|2"', raise_error=False)
+        if combo_ejercicio:
+            combo_ejercicio.click(wait_time=0.5)
+            año_ordenamiento = int(datos_pago['fecha_ordenamiento'][-4:])
+            combo_ejercicio.select(str(año_ordenamiento))
+
+        fecha_ordenpago_el = ventana_proceso.find('class:"TMaskEdit" and path:"2|1|1"').click(wait_time=0.1)
         fecha_ordenpago_el.send_keys(datos_pago['fecha_ordenamiento'], interval=0.1, wait_time=0.5, send_enter=True)
         modal_cambio_fecha_ok = ventana_proceso.find('class:"TButton" and name:"OK" and path:"1|1"', raise_error=False)
         if modal_cambio_fecha_ok:
