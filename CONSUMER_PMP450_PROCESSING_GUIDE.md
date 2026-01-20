@@ -85,7 +85,7 @@ The consumer supports **two message formats**:
   "operation_data": {
     "tipo": "pmp450",
     "detalle": {
-      "fecha": "17/09/2025",
+      "fecha": "17092025",
       "tercero": "P4001500D",
       ...
     }
