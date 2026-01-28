@@ -613,9 +613,10 @@ class PMP450Processor(SicalOperationProcessor):
                 'importe_max': first_app['importe']
             })
 
-            funcional_field = filtros_window.find(FILTROS_FORM_PATHS['funcional'])
-            funcional_field.double_click()
-            funcional_field.send_keys(first_app['funcional'], interval=0.01, wait_time=wait_time, send_enter=True)
+            #Dont ckeck funcional in no presupuestary operations.
+            #funcional_field = filtros_window.find(FILTROS_FORM_PATHS['funcional'])
+            #funcional_field.double_click()
+            #funcional_field.send_keys(first_app['funcional'], interval=0.01, wait_time=wait_time, send_enter=True)
 
             economica_field = filtros_window.find(FILTROS_FORM_PATHS['economica'])
             economica_field.double_click()
@@ -659,10 +660,16 @@ class PMP450Processor(SicalOperationProcessor):
         try:
             # Initialize form - click "Nuevo" button
             ventana.find(PMP450_FORM_PATHS['nuevo_button']).click()
-            modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'], raise_error=True)
-            modal_confirm.find(COMMON_DIALOG_PATHS['confirm_ok']).click()
+            button_nuevo_ok_confirm = ventana.find(PMP450_FORM_PATHS['nuevo_ok_button'], raise_error=True)
+            button_nuevo_ok_confirm.click()
+             # Check for select anuality on year-start
+            anuanity_select = ventana.find('class:"TDBComboBox" and path:"4|3|3|1"', timeout=0.3, raise_error=False)
 
-            # Fill operation code - PMP450 uses code 450
+            if anuanity_select:
+                anuanity_select.click(wait_time=default_wait)
+                anuanity_select.send_keys(keys=operation_data['fecha'][-4:], wait_time=default_wait)
+                anuanity_select.send_keys(keys='{Enter}', wait_time=default_wait)
+
             cod_op_element = ventana.find(PMP450_FORM_PATHS['cod_operacion']).click(wait_time=default_wait)
             cod_op_element.send_keys(keys=OPERATION_CODES['pmp450'], interval=0.05, wait_time=default_wait)
             cod_op_element.send_keys(keys='{Enter}', wait_time=default_wait)
@@ -712,7 +719,9 @@ class PMP450Processor(SicalOperationProcessor):
         tercero_element.send_keys(operation_data['tercero'], interval=0.05, wait_time=wait_time)
 
         # Tesoreria checkbox
-        ventana.find(PMP450_FORM_PATHS['tesoreria_check']).click(wait_time=wait_time)
+        tesoreria_check = ventana.find(PMP450_FORM_PATHS['tesoreria_check'])
+        tesoreria_check.click(wait_time=1.0)
+        tesoreria_check.send_keys(keys='{Space}', wait_time=wait_time)
 
         # Forma de pago
         forma_pago = find_element_with_fallback(
@@ -776,14 +785,13 @@ class PMP450Processor(SicalOperationProcessor):
 
             ventana.find(PMP450_FORM_PATHS['new_line_button']).click()
 
-            ventana.send_keys(keys='{Tab}', interval=0.05, wait_time=default_wait, send_enter=False)
-            ventana.send_keys(keys=aplicacion['funcional'], interval=default_wait, wait_time=default_wait, send_enter=True)
             ventana.send_keys(keys=aplicacion['economica'], interval=default_wait, wait_time=0.0, send_enter=True)
 
-            if aplicacion.get('gfa'):
-                ventana.send_keys(keys=aplicacion['gfa'], interval=default_wait, wait_time=default_wait, send_enter=True)
-
-            ventana.send_keys(keys='{Tab}', wait_time=0.05, interval=default_wait)
+            if aplicacion.get('contraido', False):
+                ventana.send_keys(keys=aplicacion['contraido'], interval=default_wait, wait_time=default_wait, send_enter=True)
+            else:
+                ventana.send_keys(keys='{Tab}', wait_time=0.05, interval=default_wait)
+                
             ventana.send_keys(keys=aplicacion['importe'], interval=0.05, wait_time=default_wait, send_enter=False)
             ventana.send_keys(keys='{Enter}', wait_time=default_wait)
 
