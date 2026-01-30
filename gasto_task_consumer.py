@@ -15,7 +15,7 @@ import comtypes
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
-from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
+from config_loader import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from sical_base import OperationEncoder, OperationResult, OperationStatus
 from sical_logging import setup_logging, get_consumer_logger
 from sical_config import GUI_EVENTS
