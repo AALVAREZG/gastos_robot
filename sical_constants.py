@@ -116,9 +116,9 @@ PMP450_FORM_PATHS = {
 
     # Payment form elements
     'forma_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|4"',
-    'forma_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|3"',
+    'forma_pago_alternate': 'class:"TDBEdit" and path:"4|3|5|3|1|3"',
     'tipo_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|2"',
-    'tipo_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|2"',
+    'tipo_pago_alternate': 'class:"TDBEdit" and path:"4|3|5|3|1|2"',
     'caja_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|1"',
     'caja_alternate': 'class:"TDBEdit" and path:"3|5|5|9|1"',
 
@@ -131,15 +131,18 @@ PMP450_FORM_PATHS = {
     # Action buttons
     'nuevo_button': 'path:"3|4"',
     'validar_button': 'class:"TBitBtn" and name:"Validar"',
+    'validar_confirm_ok_button': 'class:"TButton" and name:"Yes"',
+    'validar_information_ok_button': 'class:"TButton" and name:"OK"',
+    'imprimir_button': 'class:"TBitBtn" and name:"Documento"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
     'nuevo_ok_button': 'class:"TButton" and name:"OK"',
 
 
     # Result fields
-    'num_operacion': 'class:"TEdit" and path:"4|2|6|1"',
-    'total_operacion': 'class:"TCurrencyEdit" and path:"1|4"',
-    'liquido_operacion': 'class:"TCurrencyEdit" and path:"1|2"',
+    'num_operacion': 'class:"TEdit" and path:"4|3|4|1"',
+    'total_operacion': 'class:"TCurrencyEdit" and path:"1|3"',
+    'liquido_operacion': 'class:"TCurrencyEdit" and path:"1|1"',
 }
 
 # =============================================================================
@@ -231,6 +234,7 @@ DEFAULT_TIMING = {
     'force_create_wait': 3.0,  # Extra wait for force_create operations
     'key_interval': 0.05,
     'slow_key_interval': 0.1,
+    'element_timeout': 10.0,  # Timeout for finding UI elements
 }
 
 # =============================================================================

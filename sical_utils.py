@@ -355,11 +355,11 @@ def find_element_with_fallback(
     Returns:
         Element if found, None otherwise (or raises if raise_error=True)
     """
-    element = window.find(primary_path, raise_error=False)
+    element = window.find(primary_path, timeout=DEFAULT_TIMING['element_timeout'], raise_error=False)
     if element:
         return element
 
-    element = window.find(fallback_path, raise_error=raise_error)
+    element = window.find(fallback_path, timeout=DEFAULT_TIMING['element_timeout'],raise_error=raise_error)
     return element
 
 

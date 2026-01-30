@@ -720,7 +720,7 @@ class PMP450Processor(SicalOperationProcessor):
 
         # Tesoreria checkbox
         tesoreria_check = ventana.find(PMP450_FORM_PATHS['tesoreria_check'])
-        tesoreria_check.click(wait_time=1.0)
+        tesoreria_check.click(wait_time=0.1)
         tesoreria_check.send_keys(keys='{Space}', wait_time=wait_time)
 
         # Forma de pago
@@ -817,7 +817,10 @@ class PMP450Processor(SicalOperationProcessor):
         try:
             self.logger.info(f'Validating PMP450 operation in window: {ventana}')
             ventana.find(PMP450_FORM_PATHS['validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
+            ventana.find(PMP450_FORM_PATHS['validar_confirm_ok_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
+            ventana.find(PMP450_FORM_PATHS['validar_information_ok_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
 
+            '''
             modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
             modal_confirm.find(COMMON_DIALOG_PATHS['confirm_yes']).click()
             time.sleep(DEFAULT_TIMING['long_wait'])
@@ -825,14 +828,14 @@ class PMP450Processor(SicalOperationProcessor):
             modal_info = windows.find_window(SICAL_WINDOWS['information_dialog'])
             modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
             time.sleep(DEFAULT_TIMING['long_wait'])
-
+            '''
             num_operacion_field = ventana.find(PMP450_FORM_PATHS['num_operacion'], raise_error=False)
             if num_operacion_field:
                 num_operacion = num_operacion_field.get_value()
                 self.logger.info(f'Operation number assigned: {num_operacion}')
                 result.num_operacion = num_operacion
 
-            ventana.find(PMP450_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
+            
 
             result.status = OperationStatus.COMPLETED
             result.completed_phases.append({
@@ -846,7 +849,40 @@ class PMP450Processor(SicalOperationProcessor):
             result.error = f'Validation error: {str(e)}'
 
         return result
+    
 
+    def _print_operation_document_old(self, result: OperationResult) -> OperationResult:
+        """
+        Print the operation document.
+
+        From PMP450 WINDOWS
+        dont work, robocorp cant detect the confirmation dialog window
+        """
+        num_operacion = result.num_operacion
+        try:
+            ventana = self.window_manager.ventana_proceso
+            ventana.find(PMP450_FORM_PATHS['imprimir_button']).click()
+            
+            ventana_visual = windows.find_window(SICAL_WINDOWS['visual_documentos'])
+            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
+            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
+            result.completed_phases.append({
+                    'phase': 'printing',
+                    'description': f'Print operation document ID: {num_operacion}'
+                })
+            
+            ventana.find(PMP450_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
+
+        except Exception as e:
+            self.logger.error(f'Error printing document: {e}')
+            result.completed_phases.append({
+                'phase': 'printing',
+                'description': f'Print failed: {str(e)}'
+            })
+
+        return result
+
+       
     def _print_operation_document(self, result: OperationResult) -> OperationResult:
         """
         Print the operation document.
@@ -982,6 +1018,14 @@ class PMP450Processor(SicalOperationProcessor):
         self.notify_step('Processing payment order')
 
         try:
+
+            # Select year if is required (at start of year)
+            anuanity_select = ventana.find('class:"TComboBox" and path:"2|1|2"', timeout=0.3, raise_error=False)
+            if anuanity_select:
+                anuanity_select.click(wait_time=0.5)
+                año_ordenamiento = int(datos_pago['fecha_ordenamiento'][-4:])
+                anuanity_select.select(str(año_ordenamiento))
+                
             fecha_element = ventana.find(TESORERIA_PAGOS_PATHS['fecha_orden'])
             fecha_element.send_keys(datos_pago['fecha_ordenamiento'], interval=0.1, wait_time=0.5, send_enter=True)
 

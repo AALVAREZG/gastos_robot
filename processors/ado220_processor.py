@@ -908,6 +908,14 @@ class ADO220Processor(SicalOperationProcessor):
         self.notify_step('Processing payment order')
 
         try:
+
+            # Select year if is required (at start of year)
+            anuanity_select = ventana.find('class:"TComboBox" and path:"2|1|2"', timeout=0.3, raise_error=False)
+            if anuanity_select:
+                anuanity_select.click(wait_time=0.5)
+                año_ordenamiento = int(datos_pago['fecha_ordenamiento'][-4:])
+                anuanity_select.select(str(año_ordenamiento))
+
             # Set order date
             fecha_element = ventana.find(TESORERIA_PAGOS_PATHS['fecha_orden'])
             fecha_element.send_keys(datos_pago['fecha_ordenamiento'], interval=0.1, wait_time=0.5, send_enter=True)
