@@ -728,6 +728,7 @@ class PMP450Processor(SicalOperationProcessor):
             ventana,
             PMP450_FORM_PATHS['forma_pago_primary'],
             PMP450_FORM_PATHS['forma_pago_alternate'],
+            PMP450_FORM_PATHS['forma_pago_alternate2'],
             raise_error=True
         )
         forma_pago.double_click(wait_time=wait_time)
@@ -739,6 +740,7 @@ class PMP450Processor(SicalOperationProcessor):
             ventana,
             PMP450_FORM_PATHS['tipo_pago_primary'],
             PMP450_FORM_PATHS['tipo_pago_alternate'],
+            PMP450_FORM_PATHS['tipo_pago_alternate2'],
             raise_error=True
         )
         tipo_pago.double_click(wait_time=wait_time)

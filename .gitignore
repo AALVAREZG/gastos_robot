@@ -24,3 +24,7 @@ output/
 
 # Task history database
 gastos_task_history.db
+
+# distribution files
+dist/
+build/
