@@ -136,10 +136,13 @@ PMP450_FORM_PATHS = {
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
     'nuevo_ok_button': 'class:"TButton" and name:"OK"',
+    'confirm_validar_button':'class:"TButton" and name:"Yes"',
+    'confirm_validar_button_yes':'class:"TButton" and name:"OK"',
 
 
     # Result fields
-    'num_operacion': 'class:"TEdit" and path:"4|2|6|1"',
+    'num_operacion2': 'class:"TEdit" and path:"4|2|6|1"',
+    'num_operacion':  'class:"TEdit" and path:"4|3|4|1"',
     'total_operacion': 'class:"TCurrencyEdit" and path:"1|4"',
     'liquido_operacion': 'class:"TCurrencyEdit" and path:"1|2"',
 }

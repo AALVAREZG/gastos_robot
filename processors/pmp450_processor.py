@@ -10,7 +10,7 @@ See CONSUMER_PMP450_PROCESSING_GUIDE.md for detailed processing specifications.
 import re
 import time
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from datetime import datetime
 from robocorp import windows
 
@@ -150,6 +150,15 @@ class PMP450Processor(SicalOperationProcessor):
             'duplicate_confirmation_token': operation_data.get('duplicate_confirmation_token'),
             'duplicate_check_id': operation_data.get('duplicate_check_id'),
         }
+    
+    def _parse_bool_or_code(self,value: Any) -> Union[bool, str]:
+        """
+        Return the value as-is if it's a digit string (e.g. '2500037'),
+        otherwise coerce to bool.
+        """
+        if (isinstance(value, str) or isinstance(value, int)) and str(value).isdigit():
+            return str(value)
+        return bool(value)
 
     def _create_aplicaciones(self, aplicaciones_data: list) -> list:
         """
@@ -181,7 +190,7 @@ class PMP450Processor(SicalOperationProcessor):
                 'cuenta': cuenta,
                 'otro': False,
                 'year': str(aplicacion.get('year', '')),
-                'contraido': bool(aplicacion.get('contraido', False)),
+                'contraido': self._parse_bool_or_code(aplicacion.get('contraido', False)),
                 'base_imponible': float(aplicacion.get('base_imponible', 0.0)),
                 'tipo': float(aplicacion.get('tipo', 0.0)),
                 'aux': str(aplicacion.get('aux', ''))
@@ -726,9 +735,11 @@ class PMP450Processor(SicalOperationProcessor):
         # Forma de pago
         forma_pago = find_element_with_fallback(
             ventana,
-            PMP450_FORM_PATHS['forma_pago_primary'],
-            PMP450_FORM_PATHS['forma_pago_alternate'],
-            PMP450_FORM_PATHS['forma_pago_alternate2'],
+            [
+                PMP450_FORM_PATHS['forma_pago_primary'],
+                PMP450_FORM_PATHS['forma_pago_alternate'],
+                PMP450_FORM_PATHS['forma_pago_alternate2'],
+            ],
             raise_error=True
         )
         forma_pago.double_click(wait_time=wait_time)
@@ -738,9 +749,11 @@ class PMP450Processor(SicalOperationProcessor):
         # Tipo de pago
         tipo_pago = find_element_with_fallback(
             ventana,
-            PMP450_FORM_PATHS['tipo_pago_primary'],
-            PMP450_FORM_PATHS['tipo_pago_alternate'],
-            PMP450_FORM_PATHS['tipo_pago_alternate2'],
+            [
+                PMP450_FORM_PATHS['tipo_pago_primary'],
+                PMP450_FORM_PATHS['tipo_pago_alternate'],
+                PMP450_FORM_PATHS['tipo_pago_alternate2'],
+            ],
             raise_error=True
         )
         tipo_pago.double_click(wait_time=wait_time)
@@ -750,8 +763,10 @@ class PMP450Processor(SicalOperationProcessor):
         # Caja
         caja_element = find_element_with_fallback(
             ventana,
-            PMP450_FORM_PATHS['caja_primary'],
-            PMP450_FORM_PATHS['caja_alternate'],
+            [
+                PMP450_FORM_PATHS['caja_primary'],
+                PMP450_FORM_PATHS['caja_alternate'],
+            ],
             raise_error=True
         )
         caja_element.click(wait_time=wait_time)
@@ -820,12 +835,11 @@ class PMP450Processor(SicalOperationProcessor):
             self.logger.info(f'Validating PMP450 operation in window: {ventana}')
             ventana.find(PMP450_FORM_PATHS['validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
 
-            modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
-            modal_confirm.find(COMMON_DIALOG_PATHS['confirm_yes']).click()
-            time.sleep(DEFAULT_TIMING['long_wait'])
-
-            modal_info = windows.find_window(SICAL_WINDOWS['information_dialog'])
-            modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
+            #modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
+            #VALIDATION CONFIRM DIALOG in PMP450 has a different structure than ADO220, 
+            # so we need to adjust the paths. Are childen of the main window, not a separate modal.
+            ventana.find(PMP450_FORM_PATHS['confirm_validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
+            ventana.find(PMP450_FORM_PATHS['confirm_validar_button_yes']).click()
             time.sleep(DEFAULT_TIMING['long_wait'])
 
             num_operacion_field = ventana.find(PMP450_FORM_PATHS['num_operacion'], raise_error=False)

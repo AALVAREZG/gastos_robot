@@ -589,10 +589,13 @@ class ADO220Processor(SicalOperationProcessor):
         # Forma de pago (with fallback for alternate path)
         forma_pago = find_element_with_fallback(
             ventana,
-            ADO220_FORM_PATHS['forma_pago_primary'],
-            ADO220_FORM_PATHS['forma_pago_alternate'],
+            [
+                ADO220_FORM_PATHS['forma_pago_primary'],
+                ADO220_FORM_PATHS['forma_pago_alternate'],
+            ],
             raise_error=True
         )
+        
         forma_pago.double_click(wait_time=wait_time)
         forma_pago.send_keys(keys=operation_data['fpago'], interval=0.01, wait_time=wait_time)
         forma_pago.send_keys(keys='{Enter}', wait_time=wait_time)
@@ -600,8 +603,10 @@ class ADO220Processor(SicalOperationProcessor):
         # Tipo de pago
         tipo_pago = find_element_with_fallback(
             ventana,
-            ADO220_FORM_PATHS['tipo_pago_primary'],
-            ADO220_FORM_PATHS['tipo_pago_alternate'],
+            [
+                ADO220_FORM_PATHS['tipo_pago_primary'],
+                ADO220_FORM_PATHS['tipo_pago_alternate'],
+            ],
             raise_error=True
         )
         tipo_pago.double_click(wait_time=wait_time)
@@ -611,10 +616,15 @@ class ADO220Processor(SicalOperationProcessor):
         # Caja
         caja_element = find_element_with_fallback(
             ventana,
-            ADO220_FORM_PATHS['caja_primary'],
-            ADO220_FORM_PATHS['caja_alternate'],
+            [
+                ADO220_FORM_PATHS['caja_primary'],
+                ADO220_FORM_PATHS['caja_alternate'],
+            ],
             raise_error=True
         )
+        caja_element.click(wait_time=wait_time)
+        caja_element.send_keys(keys=operation_data['caja'], interval=wait_time, wait_time=wait_time)
+            
         caja_element.click(wait_time=wait_time)
         caja_element.send_keys(keys=operation_data['caja'], interval=wait_time, wait_time=wait_time)
 
