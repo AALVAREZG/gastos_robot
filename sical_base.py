@@ -131,7 +131,7 @@ class SicalWindowManager(ABC):
         Returns:
             Window object if found, None otherwise
         """
-        return windows.find_window(self.window_pattern, raise_error=False)
+        return windows.find_window(self.window_pattern, timeout=10.0, raise_error=False)
 
     def close_window(self) -> None:
         """Close the managed window safely."""

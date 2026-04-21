@@ -118,9 +118,11 @@ PMP450_FORM_PATHS = {
     'forma_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|4"',
     'forma_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|3"',
     'forma_pago_alternate2': 'class:"TDBEdit" and path:"4|3|5|4|3"',
+    'forma_pago_alternate3': 'class:"TDBEdit" and path:"4|3|5|3|1|3"',
     'tipo_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|2"',
     'tipo_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|2"',
     'tipo_pago_alternate2': 'class:"TDBEdit" and path:"|3|5|3|1|2"',
+    'tipo_pago_alternate3': 'class:"TDBEdit" and path:"|3|5|3|1|2"',
     'caja_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|1"',
     'caja_alternate': 'class:"TDBEdit" and path:"3|5|5|9|1"',
 

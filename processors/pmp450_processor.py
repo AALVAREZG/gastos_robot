@@ -739,6 +739,7 @@ class PMP450Processor(SicalOperationProcessor):
                 PMP450_FORM_PATHS['forma_pago_primary'],
                 PMP450_FORM_PATHS['forma_pago_alternate'],
                 PMP450_FORM_PATHS['forma_pago_alternate2'],
+                PMP450_FORM_PATHS['forma_pago_alternate3'],
             ],
             raise_error=True
         )
@@ -753,6 +754,7 @@ class PMP450Processor(SicalOperationProcessor):
                 PMP450_FORM_PATHS['tipo_pago_primary'],
                 PMP450_FORM_PATHS['tipo_pago_alternate'],
                 PMP450_FORM_PATHS['tipo_pago_alternate2'],
+                PMP450_FORM_PATHS['tipo_pago_alternate3'],
             ],
             raise_error=True
         )
