@@ -6,7 +6,7 @@ Provides real-time status updates, task monitoring, and service control.
 """
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext, filedialog, messagebox
+from tkinter import ttk, scrolledtext, filedialog, messagebox, font as tkfont
 import threading
 import logging
 from datetime import datetime
@@ -351,7 +351,7 @@ class GastosGUI:
         filter_frame = ttk.LabelFrame(parent, text="🔍 Filters", padding="5")
         filter_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
-        # Log level filter
+        # Row 0: level filter + search entry
         ttk.Label(filter_frame, text="Level:").grid(row=0, column=0, sticky=tk.W, padx=(0, 3))
         self.log_level_filter = ttk.Combobox(
             filter_frame,
@@ -363,29 +363,27 @@ class GastosGUI:
         self.log_level_filter.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
         self.log_level_filter.bind("<<ComboboxSelected>>", lambda e: self.apply_log_filters())
 
-        # Search entry
         ttk.Label(filter_frame, text="Search:").grid(row=0, column=2, sticky=tk.W, padx=(0, 3))
         self.log_search_entry = ttk.Entry(filter_frame, width=30)
         self.log_search_entry.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(0, 5))
         self.log_search_entry.bind("<KeyRelease>", lambda e: self.apply_log_filters())
 
-        # Apply button
+        # Row 1: action buttons
         apply_btn = ttk.Button(
             filter_frame,
             text="Apply",
             command=self.apply_log_filters,
             width=8
         )
-        apply_btn.grid(row=0, column=4, padx=3)
+        apply_btn.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(4, 0), padx=(0, 3))
 
-        # Clear filters button
         clear_btn = ttk.Button(
             filter_frame,
-            text="Clear",
+            text="Clear Filters",
             command=self.clear_log_filters,
-            width=8
+            width=10
         )
-        clear_btn.grid(row=0, column=5, padx=3)
+        clear_btn.grid(row=1, column=2, sticky=tk.W, pady=(4, 0), padx=(0, 3))
 
         # Configure column weights
         filter_frame.columnconfigure(3, weight=1)
@@ -406,12 +404,14 @@ class GastosGUI:
         )
         self.complete_log_text.pack(fill=tk.BOTH, expand=True)
 
-        # Configure log text tags for colors
-        self.complete_log_text.tag_config("INFO", foreground="black")
-        self.complete_log_text.tag_config("WARNING", foreground="orange")
-        self.complete_log_text.tag_config("ERROR", foreground="red")
-        self.complete_log_text.tag_config("CRITICAL", foreground="dark red")
-        self.complete_log_text.tag_config("DEBUG", foreground="gray")
+        # Configure log text tags: color + continuation-line indent for wrapped entries
+        _log_font = tkfont.Font(family="Consolas", size=8)
+        _prefix_px = _log_font.measure("12:34:56 [W] ")
+        self.complete_log_text.tag_config("INFO",     foreground="black",    lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("WARNING",  foreground="orange",   lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("ERROR",    foreground="red",      lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("CRITICAL", foreground="dark red", lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("DEBUG",    foreground="gray",     lmargin2=_prefix_px, spacing1=2)
 
         # Configure grid weights
         log_frame.columnconfigure(0, weight=1)
@@ -468,57 +468,75 @@ class GastosGUI:
         )
         refresh_logs_btn.grid(row=0, column=4, padx=3)
 
+    def _format_log_for_display(self, log: str, show_timestamp: bool = True):
+        """Return (display_text, level_tag) with compact format for small screens.
+
+        Input:  [2026-04-21 12:34:56] [WARNING] sical.ado220 - Some message
+        Output: 12:34:56 [W] Some message  (or  [W] Some message  when no timestamp)
+        """
+        level_abbrevs = {'INFO': 'I', 'WARNING': 'W', 'ERROR': 'E', 'CRITICAL': 'C', 'DEBUG': 'D'}
+        level_tags = {'INFO': 'INFO', 'WARNING': 'WARNING', 'ERROR': 'ERROR',
+                      'CRITICAL': 'CRITICAL', 'DEBUG': 'DEBUG'}
+
+        if not (log.startswith("[") and "] [" in log):
+            return log, "INFO"
+
+        try:
+            ts_end = log.index("] [")
+            time_part = log[1:ts_end].split(" ")[-1]  # "12:34:56"
+
+            rest = log[ts_end + 3:]
+            level_end = rest.index("]")
+            level = rest[:level_end]
+            abbrev = level_abbrevs.get(level, level[0] if level else "?")
+            level_tag = level_tags.get(level, "INFO")
+
+            message = rest[level_end + 2:].strip()
+            # Strip "sical.xxx - " or similar dotted-name logger prefix
+            if " - " in message:
+                prefix, body = message.split(" - ", 1)
+                if prefix and not any(c in prefix for c in " []()"):
+                    message = body
+
+            if show_timestamp:
+                return f"{time_part} [{abbrev}] {message}", level_tag
+            else:
+                return f"[{abbrev}] {message}", level_tag
+        except (ValueError, IndexError):
+            return log, "INFO"
+
     def apply_log_filters(self):
         """Apply filters to the log display."""
-        # Get filter values
         level_filter = self.log_level_filter.get()
         search_term = self.log_search_entry.get().lower()
         show_timestamps = self.show_timestamps_var.get()
 
-        # Get all logs from status manager
         status = status_manager.get_status()
         all_logs = status['recent_logs']
 
-        # Filter logs
         filtered_logs = []
         for log in all_logs:
-            # Level filter
-            if level_filter != "All":
-                if f"[{level_filter}]" not in log:
-                    continue
-
-            # Search filter
+            if level_filter != "All" and f"[{level_filter}]" not in log:
+                continue
             if search_term and search_term not in log.lower():
                 continue
-
-            # Remove timestamps if needed
-            if not show_timestamps and log.startswith("["):
-                # Extract just the message part
-                parts = log.split("]", 2)
-                if len(parts) >= 3:
-                    log = parts[2].strip()
-
             filtered_logs.append(log)
 
-        # Update display
+        # Preserve scroll position when auto-scroll is off
+        if not self.auto_scroll_var.get():
+            saved_yview = self.complete_log_text.yview()
+
         self.complete_log_text.config(state=tk.NORMAL)
         self.complete_log_text.delete("1.0", tk.END)
 
         for log in filtered_logs:
-            # Determine tag based on log level
-            tag = "INFO"
-            if "[ERROR]" in log or "[CRITICAL]" in log:
-                tag = "ERROR"
-            elif "[WARNING]" in log:
-                tag = "WARNING"
-            elif "[DEBUG]" in log:
-                tag = "DEBUG"
+            display_text, tag = self._format_log_for_display(log, show_timestamps)
+            self.complete_log_text.insert(tk.END, display_text + "\n", tag)
 
-            self.complete_log_text.insert(tk.END, log + "\n", tag)
-
-        # Auto-scroll if enabled
         if self.auto_scroll_var.get():
             self.complete_log_text.see(tk.END)
+        else:
+            self.complete_log_text.yview_moveto(saved_yview[0])
 
         self.complete_log_text.config(state=tk.DISABLED)
 
@@ -795,12 +813,14 @@ class GastosGUI:
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # Configure log text tags for colors
-        self.log_text.tag_config("INFO", foreground="black")
-        self.log_text.tag_config("WARNING", foreground="orange")
-        self.log_text.tag_config("ERROR", foreground="red")
-        self.log_text.tag_config("CRITICAL", foreground="dark red")
-        self.log_text.tag_config("DEBUG", foreground="gray")
+        # Configure log text tags: color + continuation-line indent for wrapped entries
+        _log_font = tkfont.Font(family="Consolas", size=8)
+        _prefix_px = _log_font.measure("12:34:56 [W] ")
+        self.log_text.tag_config("INFO",     foreground="black",    lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("WARNING",  foreground="orange",   lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("ERROR",    foreground="red",      lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("CRITICAL", foreground="dark red", lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("DEBUG",    foreground="gray",     lmargin2=_prefix_px, spacing1=2)
 
     def start_service(self):
         """Start the consumer service in a background thread."""
@@ -1170,41 +1190,29 @@ class GastosGUI:
                 self.policy_label.config(text="--", foreground="gray")
                 self.token_label.config(text="--", foreground="gray")
 
-        # Update logs
+        # Update activity log (Monitor tab)
         recent_logs = status['recent_logs']
-        if recent_logs:
-            # Get current text
-            current_logs = self.log_text.get("1.0", tk.END).strip()
-            new_logs = "\n".join(recent_logs)
+        log_count = len(recent_logs)
+        if recent_logs and log_count != getattr(self, '_last_activity_log_count', -1):
+            self._last_activity_log_count = log_count
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.delete("1.0", tk.END)
 
-            # Only update if changed
-            if current_logs != new_logs:
-                self.log_text.config(state=tk.NORMAL)
-                self.log_text.delete("1.0", tk.END)
+            for log in recent_logs:
+                display_text, tag = self._format_log_for_display(log, show_timestamp=True)
+                self.log_text.insert(tk.END, display_text + "\n", tag)
 
-                for log in recent_logs:
-                    # Determine tag based on log level
-                    tag = "INFO"
-                    if "[ERROR]" in log or "[CRITICAL]" in log:
-                        tag = "ERROR"
-                    elif "[WARNING]" in log:
-                        tag = "WARNING"
-                    elif "[DEBUG]" in log:
-                        tag = "DEBUG"
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
 
-                    self.log_text.insert(tk.END, log + "\n", tag)
-
-                # Auto-scroll to bottom
-                self.log_text.see(tk.END)
-                self.log_text.config(state=tk.DISABLED)
-
-        # Update complete logs tab if it exists
+        # Update complete logs tab only when new logs arrive
         if hasattr(self, 'complete_log_text'):
-            # Only update if the logs tab is visible or auto-refresh is needed
             try:
-                self.refresh_complete_logs()
+                if log_count != getattr(self, '_last_complete_log_count', -1):
+                    self._last_complete_log_count = log_count
+                    self.refresh_complete_logs()
             except Exception:
-                pass  # Ignore errors during refresh
+                pass
 
         # Schedule next update (500ms)
         self.root.after(500, self.update_display)
