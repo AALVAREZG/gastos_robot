@@ -7,6 +7,8 @@ constants used throughout the SICAL automation system.
 
 from typing import Dict, Tuple
 
+from uiautomation import ComboBoxControl
+
 # =============================================================================
 # WINDOW PATTERNS - Regex patterns for finding SICAL windows
 # =============================================================================
@@ -14,7 +16,7 @@ from typing import Dict, Tuple
 SICAL_WINDOWS = {
     'main_menu': 'regex:.*FMenuSical',
     'ado220': 'regex:.*SICAL II 4.2 new30',
-    'pmp450': 'regex:.*SICAL II 4.2 new30',  # TODO: Update when PMP450 window pattern is known
+    'pmp450': 'regex:.*SICAL II 4.2 mona30',  # TODO: Update when PMP450 window pattern is known
     'consulta': 'regex:.*SICAL II 4.2 ConOpera',
     'tesoreria': 'regex:.*SICAL II 4.2 TesPagos',
     'filtros': 'regex:.*SICAL II 4.2 FilOpera',
@@ -31,7 +33,7 @@ SICAL_WINDOWS = {
 
 SICAL_MENU_PATHS = {
     'ado220': ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE'),
-    'pmp450': ('GASTOS', 'OPERACIONES DE PRESUPUESTO CORRIENTE'),  # TODO: Verify actual path for PMP450
+    'pmp450': ('OPERACIONES NO PRESUPUESTARIAS', 'PROPUESTAS DE MANDAMIENTOS DE PAGO'),  # TODO: Verify actual path for PMP450
     'consulta': ('CONSULTAS AVANZADAS', 'CONSULTA DE OPERACIONES'),
     'tesoreria_pagos': ('TESORERIA', 'GESTION DE PAGOS', 'PROCESO DE ORDENACION Y PAGO'),
     'arqueo': ('TESORERIA', 'GESTION DE COBROS', 'ARQUEOS. APLICACION DIRECTA',
@@ -104,17 +106,23 @@ ADO220_FORM_PATHS = {
 
 PMP450_FORM_PATHS = {
     # Main panel elements - TODO: Update with actual paths
+
+    'ejercicio_field':'control:"ComboBoxControl" and os.path:"4|3|3|1"',
     'cod_operacion': 'class:"TComboBox" and path:"4|3|2|1"',
     'fecha': 'class:"TDBDateEdit" and path:"4|3|5|6|1"',
     'expediente': 'class:"TDBEdit" and path:"4|3|5|5|1"',
-    'tercero': 'class:"TDBEdit" and path:"4|3|5|5|1"',
+    'tercero': 'class:"TDBEdit" and path:"4|3|5|4|1"',
     'tesoreria_check': 'class:"TDBCheckBox" and name:"Tesorería"',
 
     # Payment form elements
     'forma_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|4"',
     'forma_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|3"',
-    'tipo_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|3"',
+    'forma_pago_alternate2': 'class:"TDBEdit" and path:"4|3|5|4|3"',
+    'forma_pago_alternate3': 'class:"TDBEdit" and path:"4|3|5|3|1|3"',
+    'tipo_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|2"',
     'tipo_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|2"',
+    'tipo_pago_alternate2': 'class:"TDBEdit" and path:"|3|5|3|1|2"',
+    'tipo_pago_alternate3': 'class:"TDBEdit" and path:"|3|5|3|1|2"',
     'caja_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|1"',
     'caja_alternate': 'class:"TDBEdit" and path:"3|5|5|9|1"',
 
@@ -129,9 +137,14 @@ PMP450_FORM_PATHS = {
     'validar_button': 'class:"TBitBtn" and name:"Validar"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
+    'nuevo_ok_button': 'class:"TButton" and name:"OK"',
+    'confirm_validar_button':'class:"TButton" and name:"Yes"',
+    'confirm_validar_button_yes':'class:"TButton" and name:"OK"',
+
 
     # Result fields
-    'num_operacion': 'class:"TEdit" and path:"4|2|6|1"',
+    'num_operacion2': 'class:"TEdit" and path:"4|2|6|1"',
+    'num_operacion':  'class:"TEdit" and path:"4|3|4|1"',
     'total_operacion': 'class:"TCurrencyEdit" and path:"1|4"',
     'liquido_operacion': 'class:"TCurrencyEdit" and path:"1|2"',
 }
@@ -204,6 +217,7 @@ COMMON_DIALOG_PATHS = {
     'yes_button': 'class:"TButton" and name:"Yes"',
     'no_button': 'class:"TButton" and name:"No"',
     'confirm_ok': 'name:"OK" and path:"2"',
+    'confirm_ok_2': 'name:"OK"',
     'confirm_yes': 'class:"TButton" and name:"Yes" and path:"2"',
     'confirm_yes_alt': 'class:"TButton" and name:"Yes" and path:"1|2"',
     'info_ok': 'class:"TButton" and name:"OK" and path:"1"',
@@ -216,7 +230,7 @@ COMMON_DIALOG_PATHS = {
 # =============================================================================
 
 DEFAULT_TIMING = {
-    'short_wait': 0.1,
+    'short_wait': 0.01,
     'default_wait': 0.2,
     'medium_wait': 0.5,
     'long_wait': 1.0,

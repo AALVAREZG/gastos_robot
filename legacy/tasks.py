@@ -46,11 +46,10 @@ def ordenar_y_pagar_operacion():
 @task
 def ordenar_y_pagar_lista():
     lista_operaciones = [
-        {'num_op' : '224102741', 'fecha': '10102024'},
-        {'num_op' : '224102740', 'fecha': '10102024'},
-        {'num_op' : '224102748', 'fecha': '23102024'},
-        {'num_op' : '224102749', 'fecha': '24102024'},
-        {'num_op' : '224102750', 'fecha': '24102024'},
+        {'num_op' : '326100018', 'fecha': '02012026'},
+        {'num_op' : '326100019', 'fecha': '12012026'},
+        {'num_op' : '326100020', 'fecha': '13012026'},
+        
     ]
 
     for op in lista_operaciones:

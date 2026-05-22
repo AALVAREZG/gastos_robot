@@ -15,7 +15,7 @@ import comtypes
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
 
-from config import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
+from config_loader import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from sical_base import OperationEncoder, OperationResult, OperationStatus
 from sical_logging import setup_logging, get_consumer_logger
 from sical_config import GUI_EVENTS
@@ -190,6 +190,18 @@ class GastoConsumer:
                 'operation_id': task_id,
                 'result': dataclasses.asdict(result)
             }
+
+            # Spec v2 (Phase B′): return the captured contable PDF(s) as a
+            # top-level, phase-tagged array so sical-robot can merge/stage
+            # each phase. Only present when capture ran (flag ON + finalized).
+            contables = getattr(result, '_contable_documents', None)
+            if contables:
+                response['contable_documents'] = contables
+                captured = [c for c in contables if c.get('capture_status') == 'CAPTURED']
+                self.logger.info(
+                    f'Returning {len(captured)}/{len(contables)} contable '
+                    f'document(s) to producer '
+                    f'(phases: {[c.get("phase") for c in contables]})')
 
             ch.basic_publish(
                 exchange='',

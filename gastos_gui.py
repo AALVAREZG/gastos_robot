@@ -6,9 +6,12 @@ Provides real-time status updates, task monitoring, and service control.
 """
 
 import tkinter as tk
-from tkinter import ttk, scrolledtext, filedialog, messagebox
+from tkinter import ttk, scrolledtext, filedialog, messagebox, font as tkfont
 import threading
 import logging
+import os
+import sys
+import json
 from datetime import datetime
 from typing import Optional
 
@@ -35,7 +38,8 @@ class GastosGUI:
         """Initialize the GUI."""
         self.root = root
         self.root.title("SICAL Gastos Robot - Status Monitor")
-        self.root.geometry("900x850")
+        self.root.geometry("800x650")
+        self.root.minsize(750, 550)
         self.root.resizable(True, True)
 
         # Consumer thread reference
@@ -47,6 +51,9 @@ class GastosGUI:
 
         # Create UI
         self.create_widgets()
+
+        # Apply persisted contable-capture setting and sync the toggle
+        self.init_capture_toggle()
 
         # Start update loop
         self.update_display()
@@ -68,8 +75,8 @@ class GastosGUI:
 
     def create_widgets(self):
         """Create all GUI widgets."""
-        # Main container with padding
-        main_frame = ttk.Frame(self.root, padding="10")
+        # Main container with reduced padding for compact display
+        main_frame = ttk.Frame(self.root, padding="5")
         main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
 
         # Configure grid weights for resizing
@@ -78,13 +85,13 @@ class GastosGUI:
         main_frame.columnconfigure(0, weight=1)
         main_frame.rowconfigure(1, weight=1)  # Notebook expands
 
-        # Title
+        # Title - smaller font for compact display
         title_label = ttk.Label(
             main_frame,
             text="SICAL Gastos Robot - Status Monitor",
-            font=("Segoe UI", 14, "bold")
+            font=("Segoe UI", 11, "bold")
         )
-        title_label.grid(row=0, column=0, pady=(0, 10))
+        title_label.grid(row=0, column=0, pady=(0, 5))
 
         # Create notebook (tabbed interface)
         self.notebook = ttk.Notebook(main_frame)
@@ -97,8 +104,8 @@ class GastosGUI:
 
     def create_monitor_tab(self):
         """Create the Monitor tab with real-time status."""
-        # Create frame for monitor tab
-        monitor_frame = ttk.Frame(self.notebook, padding="10")
+        # Create frame for monitor tab - reduced padding for compact display
+        monitor_frame = ttk.Frame(self.notebook, padding="5")
         self.notebook.add(monitor_frame, text="📊 Monitor")
 
         # Configure grid
@@ -114,8 +121,8 @@ class GastosGUI:
 
     def create_history_tab(self):
         """Create the History tab with task history table."""
-        # Create frame for history tab
-        history_frame = ttk.Frame(self.notebook, padding="10")
+        # Create frame for history tab - reduced padding for compact display
+        history_frame = ttk.Frame(self.notebook, padding="5")
         self.notebook.add(history_frame, text="📜 History")
 
         # Configure grid
@@ -136,103 +143,103 @@ class GastosGUI:
 
     def create_history_search_panel(self, parent):
         """Create search and filter controls for history."""
-        search_frame = ttk.LabelFrame(parent, text="🔍 Search & Filter", padding="10")
-        search_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        search_frame = ttk.LabelFrame(parent, text="🔍 Search & Filter", padding="5")
+        search_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
         # Search entry
-        ttk.Label(search_frame, text="Search:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
-        self.search_entry = ttk.Entry(search_frame, width=40)
-        self.search_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        ttk.Label(search_frame, text="Search:").grid(row=0, column=0, sticky=tk.W, padx=(0, 3))
+        self.search_entry = ttk.Entry(search_frame, width=30)
+        self.search_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 5))
 
         # Status filter
-        ttk.Label(search_frame, text="Status:").grid(row=0, column=2, sticky=tk.W, padx=(10, 5))
+        ttk.Label(search_frame, text="Status:").grid(row=0, column=2, sticky=tk.W, padx=(5, 3))
         self.status_filter = ttk.Combobox(
             search_frame,
             values=["All", "Completed", "Failed", "Error"],
             state="readonly",
-            width=15
+            width=10
         )
         self.status_filter.set("All")
-        self.status_filter.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
+        self.status_filter.grid(row=0, column=3, sticky=tk.W, padx=(0, 5))
 
         # Search button
         search_btn = ttk.Button(
             search_frame,
             text="🔍 Search",
             command=self.load_history,
-            width=12
+            width=10
         )
-        search_btn.grid(row=0, column=4, padx=5)
+        search_btn.grid(row=0, column=4, padx=3)
 
         # Refresh button
         refresh_btn = ttk.Button(
             search_frame,
             text="🔄 Refresh",
             command=self.load_history,
-            width=12
+            width=10
         )
-        refresh_btn.grid(row=0, column=5, padx=5)
+        refresh_btn.grid(row=0, column=5, padx=3)
 
         # Configure column weights
         search_frame.columnconfigure(1, weight=1)
 
     def create_history_stats_panel(self, parent):
         """Create overall history statistics panel."""
-        stats_frame = ttk.LabelFrame(parent, text="📈 Overall Statistics", padding="10")
-        stats_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        stats_frame = ttk.LabelFrame(parent, text="📈 Statistics", padding="5")
+        stats_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
         # Total tasks
-        ttk.Label(stats_frame, text="Total Tasks:", font=("Segoe UI", 9)).grid(
-            row=0, column=0, sticky=tk.W, padx=(0, 20)
+        ttk.Label(stats_frame, text="Total:", font=("Segoe UI", 8)).grid(
+            row=0, column=0, sticky=tk.W, padx=(0, 3)
         )
         self.hist_total_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 10, "bold")
+            font=("Segoe UI", 9, "bold")
         )
-        self.hist_total_label.grid(row=0, column=1, sticky=tk.W)
+        self.hist_total_label.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
 
         # Completed
-        ttk.Label(stats_frame, text="Completed:", font=("Segoe UI", 9)).grid(
-            row=0, column=2, sticky=tk.W, padx=(20, 5)
+        ttk.Label(stats_frame, text="Completed:", font=("Segoe UI", 8)).grid(
+            row=0, column=2, sticky=tk.W, padx=(0, 3)
         )
         self.hist_completed_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             foreground="green"
         )
-        self.hist_completed_label.grid(row=0, column=3, sticky=tk.W, padx=(0, 20))
+        self.hist_completed_label.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
 
         # Failed
-        ttk.Label(stats_frame, text="Failed:", font=("Segoe UI", 9)).grid(
-            row=0, column=4, sticky=tk.W, padx=(0, 5)
+        ttk.Label(stats_frame, text="Failed:", font=("Segoe UI", 8)).grid(
+            row=0, column=4, sticky=tk.W, padx=(0, 3)
         )
         self.hist_failed_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 10, "bold"),
+            font=("Segoe UI", 9, "bold"),
             foreground="red"
         )
-        self.hist_failed_label.grid(row=0, column=5, sticky=tk.W, padx=(0, 20))
+        self.hist_failed_label.grid(row=0, column=5, sticky=tk.W, padx=(0, 10))
 
         # Average duration
-        ttk.Label(stats_frame, text="Avg Duration:", font=("Segoe UI", 9)).grid(
-            row=0, column=6, sticky=tk.W, padx=(0, 5)
+        ttk.Label(stats_frame, text="Avg:", font=("Segoe UI", 8)).grid(
+            row=0, column=6, sticky=tk.W, padx=(0, 3)
         )
         self.hist_avg_duration_label = ttk.Label(
             stats_frame,
             text="--",
-            font=("Segoe UI", 10, "bold")
+            font=("Segoe UI", 9, "bold")
         )
         self.hist_avg_duration_label.grid(row=0, column=7, sticky=tk.W)
 
     def create_history_table(self, parent):
         """Create the task history table."""
-        table_frame = ttk.LabelFrame(parent, text="📋 Task History", padding="5")
-        table_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        table_frame = ttk.LabelFrame(parent, text="📋 Task History", padding="3")
+        table_frame.grid(row=2, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
 
-        # Create Treeview with scrollbars
+        # Create Treeview with scrollbars - reduced height for compact display
         tree_scroll_y = ttk.Scrollbar(table_frame, orient=tk.VERTICAL)
         tree_scroll_x = ttk.Scrollbar(table_frame, orient=tk.HORIZONTAL)
 
@@ -243,7 +250,7 @@ class GastosGUI:
             show="headings",
             yscrollcommand=tree_scroll_y.set,
             xscrollcommand=tree_scroll_x.set,
-            height=15
+            height=10
         )
 
         tree_scroll_y.config(command=self.history_tree.yview)
@@ -294,43 +301,43 @@ class GastosGUI:
 
     def create_export_panel(self, parent):
         """Create export buttons."""
-        export_frame = ttk.LabelFrame(parent, text="📤 Export", padding="10")
-        export_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        export_frame = ttk.LabelFrame(parent, text="📤 Export", padding="5")
+        export_frame.grid(row=3, column=0, sticky=(tk.W, tk.E), pady=(0, 3))
 
-        ttk.Label(export_frame, text="Export history to:").grid(row=0, column=0, padx=(0, 10))
+        ttk.Label(export_frame, text="Export to:").grid(row=0, column=0, padx=(0, 5))
 
         # Excel export
         excel_btn = ttk.Button(
             export_frame,
-            text="📊 Excel (.xlsx)",
+            text="📊 Excel",
             command=lambda: self.export_history("excel"),
-            width=15
+            width=10
         )
-        excel_btn.grid(row=0, column=1, padx=5)
+        excel_btn.grid(row=0, column=1, padx=3)
 
         # JSON export
         json_btn = ttk.Button(
             export_frame,
             text="📄 JSON",
             command=lambda: self.export_history("json"),
-            width=15
+            width=10
         )
-        json_btn.grid(row=0, column=2, padx=5)
+        json_btn.grid(row=0, column=2, padx=3)
 
         # CSV export
         csv_btn = ttk.Button(
             export_frame,
             text="📋 CSV",
             command=lambda: self.export_history("csv"),
-            width=15
+            width=10
         )
-        csv_btn.grid(row=0, column=3, padx=5)
+        csv_btn.grid(row=0, column=3, padx=3)
 
     def create_logs_tab(self):
         """Create the Logs tab with complete logging history and filtering."""
-        # Create frame for logs tab
-        logs_frame = ttk.Frame(self.notebook, padding="10")
-        self.notebook.add(logs_frame, text="📋 Complete Logs")
+        # Create frame for logs tab - reduced padding for compact display
+        logs_frame = ttk.Frame(self.notebook, padding="5")
+        self.notebook.add(logs_frame, text="📋 Logs")
 
         # Configure grid
         logs_frame.columnconfigure(0, weight=1)
@@ -347,70 +354,70 @@ class GastosGUI:
 
     def create_log_filter_panel(self, parent):
         """Create log filter controls."""
-        filter_frame = ttk.LabelFrame(parent, text="🔍 Log Filters", padding="10")
-        filter_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 10))
+        filter_frame = ttk.LabelFrame(parent, text="🔍 Filters", padding="5")
+        filter_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
 
-        # Log level filter
-        ttk.Label(filter_frame, text="Level:").grid(row=0, column=0, sticky=tk.W, padx=(0, 5))
+        # Row 0: level filter + search entry
+        ttk.Label(filter_frame, text="Level:").grid(row=0, column=0, sticky=tk.W, padx=(0, 3))
         self.log_level_filter = ttk.Combobox(
             filter_frame,
             values=["All", "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
             state="readonly",
-            width=12
+            width=10
         )
         self.log_level_filter.set("All")
-        self.log_level_filter.grid(row=0, column=1, sticky=tk.W, padx=(0, 15))
+        self.log_level_filter.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
         self.log_level_filter.bind("<<ComboboxSelected>>", lambda e: self.apply_log_filters())
 
-        # Search entry
-        ttk.Label(filter_frame, text="Search:").grid(row=0, column=2, sticky=tk.W, padx=(0, 5))
-        self.log_search_entry = ttk.Entry(filter_frame, width=40)
-        self.log_search_entry.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(0, 10))
+        ttk.Label(filter_frame, text="Search:").grid(row=0, column=2, sticky=tk.W, padx=(0, 3))
+        self.log_search_entry = ttk.Entry(filter_frame, width=30)
+        self.log_search_entry.grid(row=0, column=3, sticky=(tk.W, tk.E), padx=(0, 5))
         self.log_search_entry.bind("<KeyRelease>", lambda e: self.apply_log_filters())
 
-        # Apply button
+        # Row 1: action buttons
         apply_btn = ttk.Button(
             filter_frame,
             text="Apply",
             command=self.apply_log_filters,
-            width=10
+            width=8
         )
-        apply_btn.grid(row=0, column=4, padx=5)
+        apply_btn.grid(row=1, column=0, columnspan=2, sticky=tk.W, pady=(4, 0), padx=(0, 3))
 
-        # Clear filters button
         clear_btn = ttk.Button(
             filter_frame,
-            text="Clear",
+            text="Clear Filters",
             command=self.clear_log_filters,
             width=10
         )
-        clear_btn.grid(row=0, column=5, padx=5)
+        clear_btn.grid(row=1, column=2, sticky=tk.W, pady=(4, 0), padx=(0, 3))
 
         # Configure column weights
         filter_frame.columnconfigure(3, weight=1)
 
     def create_complete_log_display(self, parent):
         """Create the complete log display area."""
-        log_frame = ttk.LabelFrame(parent, text="📝 Complete Log History", padding="5")
-        log_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10))
+        log_frame = ttk.LabelFrame(parent, text="📝 Log History", padding="3")
+        log_frame.grid(row=1, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 5))
 
-        # Log text widget with scrollbar
+        # Log text widget with scrollbar - reduced size for compact display
         self.complete_log_text = scrolledtext.ScrolledText(
             log_frame,
             wrap=tk.WORD,
-            width=100,
-            height=25,
-            font=("Consolas", 9),
+            width=80,
+            height=15,
+            font=("Consolas", 8),
             state=tk.DISABLED
         )
         self.complete_log_text.pack(fill=tk.BOTH, expand=True)
 
-        # Configure log text tags for colors
-        self.complete_log_text.tag_config("INFO", foreground="black")
-        self.complete_log_text.tag_config("WARNING", foreground="orange")
-        self.complete_log_text.tag_config("ERROR", foreground="red")
-        self.complete_log_text.tag_config("CRITICAL", foreground="dark red")
-        self.complete_log_text.tag_config("DEBUG", foreground="gray")
+        # Configure log text tags: color + continuation-line indent for wrapped entries
+        _log_font = tkfont.Font(family="Consolas", size=8)
+        _prefix_px = _log_font.measure("12:34:56 [W] ")
+        self.complete_log_text.tag_config("INFO",     foreground="black",    lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("WARNING",  foreground="orange",   lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("ERROR",    foreground="red",      lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("CRITICAL", foreground="dark red", lmargin2=_prefix_px, spacing1=2)
+        self.complete_log_text.tag_config("DEBUG",    foreground="gray",     lmargin2=_prefix_px, spacing1=2)
 
         # Configure grid weights
         log_frame.columnconfigure(0, weight=1)
@@ -418,106 +425,124 @@ class GastosGUI:
 
     def create_log_control_panel(self, parent):
         """Create log control buttons."""
-        control_frame = ttk.LabelFrame(parent, text="⚙️ Controls", padding="10")
-        control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 5))
+        control_frame = ttk.LabelFrame(parent, text="⚙️ Controls", padding="5")
+        control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 3))
 
         # Auto-scroll checkbox
         self.auto_scroll_var = tk.BooleanVar(value=True)
         auto_scroll_check = ttk.Checkbutton(
             control_frame,
-            text="Auto-scroll to bottom",
+            text="Auto-scroll",
             variable=self.auto_scroll_var
         )
-        auto_scroll_check.grid(row=0, column=0, padx=5)
+        auto_scroll_check.grid(row=0, column=0, padx=3)
 
         # Show timestamps checkbox
         self.show_timestamps_var = tk.BooleanVar(value=True)
         timestamps_check = ttk.Checkbutton(
             control_frame,
-            text="Show timestamps",
+            text="Timestamps",
             variable=self.show_timestamps_var,
             command=self.apply_log_filters
         )
-        timestamps_check.grid(row=0, column=1, padx=5)
+        timestamps_check.grid(row=0, column=1, padx=3)
 
         # Clear logs button
         clear_logs_btn = ttk.Button(
             control_frame,
-            text="🗑 Clear Logs",
+            text="🗑 Clear",
             command=self.clear_complete_logs,
-            width=15
+            width=10
         )
-        clear_logs_btn.grid(row=0, column=2, padx=5)
+        clear_logs_btn.grid(row=0, column=2, padx=3)
 
         # Export logs button
         export_logs_btn = ttk.Button(
             control_frame,
-            text="💾 Export Logs",
+            text="💾 Export",
             command=self.export_logs,
-            width=15
+            width=10
         )
-        export_logs_btn.grid(row=0, column=3, padx=5)
+        export_logs_btn.grid(row=0, column=3, padx=3)
 
         # Refresh button
         refresh_logs_btn = ttk.Button(
             control_frame,
             text="🔄 Refresh",
             command=self.refresh_complete_logs,
-            width=15
+            width=10
         )
-        refresh_logs_btn.grid(row=0, column=4, padx=5)
+        refresh_logs_btn.grid(row=0, column=4, padx=3)
+
+    def _format_log_for_display(self, log: str, show_timestamp: bool = True):
+        """Return (display_text, level_tag) with compact format for small screens.
+
+        Input:  [2026-04-21 12:34:56] [WARNING] sical.ado220 - Some message
+        Output: 12:34:56 [W] Some message  (or  [W] Some message  when no timestamp)
+        """
+        level_abbrevs = {'INFO': 'I', 'WARNING': 'W', 'ERROR': 'E', 'CRITICAL': 'C', 'DEBUG': 'D'}
+        level_tags = {'INFO': 'INFO', 'WARNING': 'WARNING', 'ERROR': 'ERROR',
+                      'CRITICAL': 'CRITICAL', 'DEBUG': 'DEBUG'}
+
+        if not (log.startswith("[") and "] [" in log):
+            return log, "INFO"
+
+        try:
+            ts_end = log.index("] [")
+            time_part = log[1:ts_end].split(" ")[-1]  # "12:34:56"
+
+            rest = log[ts_end + 3:]
+            level_end = rest.index("]")
+            level = rest[:level_end]
+            abbrev = level_abbrevs.get(level, level[0] if level else "?")
+            level_tag = level_tags.get(level, "INFO")
+
+            message = rest[level_end + 2:].strip()
+            # Strip "sical.xxx - " or similar dotted-name logger prefix
+            if " - " in message:
+                prefix, body = message.split(" - ", 1)
+                if prefix and not any(c in prefix for c in " []()"):
+                    message = body
+
+            if show_timestamp:
+                return f"{time_part} [{abbrev}] {message}", level_tag
+            else:
+                return f"[{abbrev}] {message}", level_tag
+        except (ValueError, IndexError):
+            return log, "INFO"
 
     def apply_log_filters(self):
         """Apply filters to the log display."""
-        # Get filter values
         level_filter = self.log_level_filter.get()
         search_term = self.log_search_entry.get().lower()
         show_timestamps = self.show_timestamps_var.get()
 
-        # Get all logs from status manager
         status = status_manager.get_status()
         all_logs = status['recent_logs']
 
-        # Filter logs
         filtered_logs = []
         for log in all_logs:
-            # Level filter
-            if level_filter != "All":
-                if f"[{level_filter}]" not in log:
-                    continue
-
-            # Search filter
+            if level_filter != "All" and f"[{level_filter}]" not in log:
+                continue
             if search_term and search_term not in log.lower():
                 continue
-
-            # Remove timestamps if needed
-            if not show_timestamps and log.startswith("["):
-                # Extract just the message part
-                parts = log.split("]", 2)
-                if len(parts) >= 3:
-                    log = parts[2].strip()
-
             filtered_logs.append(log)
 
-        # Update display
+        # Preserve scroll position when auto-scroll is off
+        if not self.auto_scroll_var.get():
+            saved_yview = self.complete_log_text.yview()
+
         self.complete_log_text.config(state=tk.NORMAL)
         self.complete_log_text.delete("1.0", tk.END)
 
         for log in filtered_logs:
-            # Determine tag based on log level
-            tag = "INFO"
-            if "[ERROR]" in log or "[CRITICAL]" in log:
-                tag = "ERROR"
-            elif "[WARNING]" in log:
-                tag = "WARNING"
-            elif "[DEBUG]" in log:
-                tag = "DEBUG"
+            display_text, tag = self._format_log_for_display(log, show_timestamps)
+            self.complete_log_text.insert(tk.END, display_text + "\n", tag)
 
-            self.complete_log_text.insert(tk.END, log + "\n", tag)
-
-        # Auto-scroll if enabled
         if self.auto_scroll_var.get():
             self.complete_log_text.see(tk.END)
+        else:
+            self.complete_log_text.yview_moveto(saved_yview[0])
 
         self.complete_log_text.config(state=tk.DISABLED)
 
@@ -572,280 +597,258 @@ class GastosGUI:
 
     def create_status_panel(self, parent):
         """Create the service status panel."""
-        status_frame = ttk.LabelFrame(parent, text="Service Status", padding="10")
-        status_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        status_frame = ttk.LabelFrame(parent, text="Status", padding="5")
+        status_frame.grid(row=1, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=3)
 
         # Service status
-        ttk.Label(status_frame, text="Service:").grid(row=0, column=0, sticky=tk.W)
+        ttk.Label(status_frame, text="Service:", font=("Segoe UI", 8)).grid(row=0, column=0, sticky=tk.W)
         self.service_status_label = ttk.Label(
             status_frame,
             text="● STOPPED",
             foreground="red",
-            font=("Segoe UI", 10, "bold")
+            font=("Segoe UI", 9, "bold")
         )
-        self.service_status_label.grid(row=0, column=1, sticky=tk.W, padx=(5, 20))
+        self.service_status_label.grid(row=0, column=1, sticky=tk.W, padx=(3, 15))
 
         # RabbitMQ status
-        ttk.Label(status_frame, text="RabbitMQ:").grid(row=0, column=2, sticky=tk.W)
+        ttk.Label(status_frame, text="RabbitMQ:", font=("Segoe UI", 8)).grid(row=0, column=2, sticky=tk.W)
         self.rabbitmq_status_label = ttk.Label(
             status_frame,
             text="● DISCONNECTED",
             foreground="red",
-            font=("Segoe UI", 10, "bold")
+            font=("Segoe UI", 9, "bold")
         )
-        self.rabbitmq_status_label.grid(row=0, column=3, sticky=tk.W, padx=5)
+        self.rabbitmq_status_label.grid(row=0, column=3, sticky=tk.W, padx=3)
 
         # Uptime
-        ttk.Label(status_frame, text="Uptime:").grid(row=0, column=4, sticky=tk.W, padx=(20, 0))
-        self.uptime_label = ttk.Label(status_frame, text="--:--:--")
-        self.uptime_label.grid(row=0, column=5, sticky=tk.W, padx=5)
+        ttk.Label(status_frame, text="Uptime:", font=("Segoe UI", 8)).grid(row=0, column=4, sticky=tk.W, padx=(15, 0))
+        self.uptime_label = ttk.Label(status_frame, text="--:--:--", font=("Segoe UI", 8))
+        self.uptime_label.grid(row=0, column=5, sticky=tk.W, padx=3)
 
     def create_statistics_panel(self, parent):
-        """Create the statistics panel."""
-        stats_frame = ttk.LabelFrame(parent, text="📊 Statistics", padding="10")
-        stats_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        """Create the statistics panel - compact single row layout."""
+        stats_frame = ttk.LabelFrame(parent, text="📊 Stats", padding="5")
+        stats_frame.grid(row=2, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=3)
 
         # Configure columns
-        for i in range(5):
+        for i in range(10):
             stats_frame.columnconfigure(i, weight=1)
 
-        # Pending
-        ttk.Label(stats_frame, text="Pending:", font=("Segoe UI", 9)).grid(
-            row=0, column=0, sticky=tk.W
-        )
+        # Pending - single row layout with label and value side by side
+        ttk.Label(stats_frame, text="Pending:", font=("Segoe UI", 8)).grid(row=0, column=0, sticky=tk.W)
         self.pending_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 9, "bold"),
             foreground="orange"
         )
-        self.pending_label.grid(row=1, column=0, sticky=tk.W)
+        self.pending_label.grid(row=0, column=1, sticky=tk.W, padx=(0, 10))
 
         # Processing
-        ttk.Label(stats_frame, text="Processing:", font=("Segoe UI", 9)).grid(
-            row=0, column=1, sticky=tk.W
-        )
+        ttk.Label(stats_frame, text="Processing:", font=("Segoe UI", 8)).grid(row=0, column=2, sticky=tk.W)
         self.processing_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 9, "bold"),
             foreground="blue"
         )
-        self.processing_label.grid(row=1, column=1, sticky=tk.W)
+        self.processing_label.grid(row=0, column=3, sticky=tk.W, padx=(0, 10))
 
         # Completed
-        ttk.Label(stats_frame, text="Completed:", font=("Segoe UI", 9)).grid(
-            row=0, column=2, sticky=tk.W
-        )
+        ttk.Label(stats_frame, text="Completed:", font=("Segoe UI", 8)).grid(row=0, column=4, sticky=tk.W)
         self.completed_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 9, "bold"),
             foreground="green"
         )
-        self.completed_label.grid(row=1, column=2, sticky=tk.W)
+        self.completed_label.grid(row=0, column=5, sticky=tk.W, padx=(0, 10))
 
         # Failed
-        ttk.Label(stats_frame, text="Failed:", font=("Segoe UI", 9)).grid(
-            row=0, column=3, sticky=tk.W
-        )
+        ttk.Label(stats_frame, text="Failed:", font=("Segoe UI", 8)).grid(row=0, column=6, sticky=tk.W)
         self.failed_label = ttk.Label(
             stats_frame,
             text="0",
-            font=("Segoe UI", 11, "bold"),
+            font=("Segoe UI", 9, "bold"),
             foreground="red"
         )
-        self.failed_label.grid(row=1, column=3, sticky=tk.W)
+        self.failed_label.grid(row=0, column=7, sticky=tk.W, padx=(0, 10))
 
         # Success Rate
-        ttk.Label(stats_frame, text="Success Rate:", font=("Segoe UI", 9)).grid(
-            row=0, column=4, sticky=tk.W
-        )
+        ttk.Label(stats_frame, text="Rate:", font=("Segoe UI", 8)).grid(row=0, column=8, sticky=tk.W)
         self.success_rate_label = ttk.Label(
             stats_frame,
             text="0.0%",
-            font=("Segoe UI", 11, "bold")
+            font=("Segoe UI", 9, "bold")
         )
-        self.success_rate_label.grid(row=1, column=4, sticky=tk.W)
+        self.success_rate_label.grid(row=0, column=9, sticky=tk.W)
 
     def create_current_task_panel(self, parent):
-        """Create the current task panel."""
-        task_frame = ttk.LabelFrame(parent, text="🔄 Current Task", padding="10")
-        task_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=5)
+        """Create the current task panel - compact layout for small screens."""
+        task_frame = ttk.LabelFrame(parent, text="🔄 Current Task", padding="5")
+        task_frame.grid(row=3, column=0, columnspan=2, sticky=(tk.W, tk.E), pady=3)
 
-        # Configure grid columns for better layout
-        task_frame.columnconfigure(1, weight=1)
-        task_frame.columnconfigure(3, weight=1)
+        # Configure grid columns for 6-column layout
+        for i in range(6):
+            task_frame.columnconfigure(i, weight=1)
 
-        # Task info labels
+        # Row 0: Task header
         self.current_task_label = ttk.Label(
             task_frame,
             text="No task currently processing",
-            font=("Segoe UI", 9, "bold"),
+            font=("Segoe UI", 8, "bold"),
             foreground="gray"
         )
-        self.current_task_label.grid(row=0, column=0, sticky=tk.W, columnspan=4, pady=(0, 5))
+        self.current_task_label.grid(row=0, column=0, sticky=tk.W, columnspan=6, pady=(0, 3))
 
-        # Row 1: Operation Type and Operation Number
-        ttk.Label(task_frame, text="Type:", font=("Segoe UI", 9)).grid(
-            row=1, column=0, sticky=tk.W
-        )
-        self.operation_type_label = ttk.Label(task_frame, text="--")
-        self.operation_type_label.grid(row=1, column=1, sticky=tk.W, padx=(5, 15))
+        # Row 1: Type, Operation, Date, Duration (4 items in one row)
+        ttk.Label(task_frame, text="Type:", font=("Segoe UI", 8)).grid(row=1, column=0, sticky=tk.W)
+        self.operation_type_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.operation_type_label.grid(row=1, column=1, sticky=tk.W, padx=(0, 5))
 
-        ttk.Label(task_frame, text="Operation:", font=("Segoe UI", 9)).grid(
-            row=1, column=2, sticky=tk.W
-        )
-        self.operation_label = ttk.Label(task_frame, text="--")
-        self.operation_label.grid(row=1, column=3, sticky=tk.W, padx=5)
+        ttk.Label(task_frame, text="Op#:", font=("Segoe UI", 8)).grid(row=1, column=2, sticky=tk.W)
+        self.operation_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.operation_label.grid(row=1, column=3, sticky=tk.W, padx=(0, 5))
 
-        # Row 2: Date and Duration
-        ttk.Label(task_frame, text="Date:", font=("Segoe UI", 9)).grid(
-            row=2, column=0, sticky=tk.W
-        )
-        self.date_label = ttk.Label(task_frame, text="--")
-        self.date_label.grid(row=2, column=1, sticky=tk.W, padx=(5, 15))
+        ttk.Label(task_frame, text="Date:", font=("Segoe UI", 8)).grid(row=1, column=4, sticky=tk.W)
+        self.date_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.date_label.grid(row=1, column=5, sticky=tk.W)
 
-        ttk.Label(task_frame, text="Duration:", font=("Segoe UI", 9)).grid(
-            row=2, column=2, sticky=tk.W
-        )
-        self.duration_label = ttk.Label(task_frame, text="--")
-        self.duration_label.grid(row=2, column=3, sticky=tk.W, padx=5)
+        # Row 2: Amount, Cash Register, Nature, Duration
+        ttk.Label(task_frame, text="Amount:", font=("Segoe UI", 8)).grid(row=2, column=0, sticky=tk.W)
+        self.amount_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.amount_label.grid(row=2, column=1, sticky=tk.W, padx=(0, 5))
 
-        # Row 3: Amount and Cash Register
-        ttk.Label(task_frame, text="Amount:", font=("Segoe UI", 9)).grid(
-            row=3, column=0, sticky=tk.W
-        )
-        self.amount_label = ttk.Label(task_frame, text="--")
-        self.amount_label.grid(row=3, column=1, sticky=tk.W, padx=(5, 15))
+        ttk.Label(task_frame, text="Cash:", font=("Segoe UI", 8)).grid(row=2, column=2, sticky=tk.W)
+        self.cash_register_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.cash_register_label.grid(row=2, column=3, sticky=tk.W, padx=(0, 5))
 
-        ttk.Label(task_frame, text="Cash Register:", font=("Segoe UI", 9)).grid(
-            row=3, column=2, sticky=tk.W
-        )
-        self.cash_register_label = ttk.Label(task_frame, text="--")
-        self.cash_register_label.grid(row=3, column=3, sticky=tk.W, padx=5)
+        ttk.Label(task_frame, text="Nature:", font=("Segoe UI", 8)).grid(row=2, column=4, sticky=tk.W)
+        self.nature_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.nature_label.grid(row=2, column=5, sticky=tk.W)
 
-        # Row 4: Nature (full width)
-        ttk.Label(task_frame, text="Nature:", font=("Segoe UI", 9)).grid(
-            row=4, column=0, sticky=tk.W
-        )
-        self.nature_label = ttk.Label(task_frame, text="--")
-        self.nature_label.grid(row=4, column=1, sticky=tk.W, columnspan=3, padx=5)
+        # Row 3: Third Party and Duration
+        ttk.Label(task_frame, text="Third:", font=("Segoe UI", 8)).grid(row=3, column=0, sticky=tk.W)
+        self.third_party_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8), wraplength=350)
+        self.third_party_label.grid(row=3, column=1, sticky=tk.W, columnspan=3, padx=(0, 5))
 
-        # Row 5: Third Party (full width)
-        ttk.Label(task_frame, text="Third Party:", font=("Segoe UI", 9)).grid(
-            row=5, column=0, sticky=tk.W
-        )
-        self.third_party_label = ttk.Label(task_frame, text="--", wraplength=600)
-        self.third_party_label.grid(row=5, column=1, sticky=tk.W, columnspan=3, padx=5)
+        ttk.Label(task_frame, text="Dur:", font=("Segoe UI", 8)).grid(row=3, column=4, sticky=tk.W)
+        self.duration_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.duration_label.grid(row=3, column=5, sticky=tk.W)
 
-        # Row 6: Description (full width)
-        ttk.Label(task_frame, text="Description:", font=("Segoe UI", 9)).grid(
-            row=6, column=0, sticky=tk.W
-        )
-        self.description_label = ttk.Label(task_frame, text="--", wraplength=600)
-        self.description_label.grid(row=6, column=1, sticky=tk.W, columnspan=3, padx=5)
+        # Row 4: Description
+        ttk.Label(task_frame, text="Desc:", font=("Segoe UI", 8)).grid(row=4, column=0, sticky=tk.W)
+        self.description_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8), wraplength=500)
+        self.description_label.grid(row=4, column=1, sticky=tk.W, columnspan=5)
 
         # Separator
-        ttk.Separator(task_frame, orient='horizontal').grid(
-            row=7, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=8
-        )
+        ttk.Separator(task_frame, orient='horizontal').grid(row=5, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=3)
 
-        # Row 8: Line items progress
-        ttk.Label(task_frame, text="Line Items:", font=("Segoe UI", 9, "bold")).grid(
-            row=8, column=0, sticky=tk.W
-        )
-        self.line_items_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 9))
-        self.line_items_label.grid(row=8, column=1, sticky=tk.W, columnspan=3, padx=5)
+        # Row 6: Line items, Current Item, Status in compact form
+        ttk.Label(task_frame, text="Items:", font=("Segoe UI", 8, "bold")).grid(row=6, column=0, sticky=tk.W)
+        self.line_items_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.line_items_label.grid(row=6, column=1, sticky=tk.W, padx=(0, 5))
 
-        # Row 9: Current line item details
-        ttk.Label(task_frame, text="Current Item:", font=("Segoe UI", 9)).grid(
-            row=9, column=0, sticky=tk.W
-        )
-        self.line_item_details_label = ttk.Label(task_frame, text="--", wraplength=600)
-        self.line_item_details_label.grid(row=9, column=1, sticky=tk.W, columnspan=3, padx=5)
+        ttk.Label(task_frame, text="Current:", font=("Segoe UI", 8)).grid(row=6, column=2, sticky=tk.W)
+        self.line_item_details_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8), wraplength=300)
+        self.line_item_details_label.grid(row=6, column=3, sticky=tk.W, columnspan=3)
 
-        # Row 10: Current step
-        ttk.Label(task_frame, text="Status:", font=("Segoe UI", 9)).grid(
-            row=10, column=0, sticky=tk.W
-        )
-        self.step_label = ttk.Label(task_frame, text="--", wraplength=600, foreground="blue")
-        self.step_label.grid(row=10, column=1, sticky=tk.W, columnspan=3, padx=5)
+        # Row 7: Status
+        ttk.Label(task_frame, text="Status:", font=("Segoe UI", 8)).grid(row=7, column=0, sticky=tk.W)
+        self.step_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8), wraplength=500, foreground="blue")
+        self.step_label.grid(row=7, column=1, sticky=tk.W, columnspan=5)
 
         # Separator
-        ttk.Separator(task_frame, orient='horizontal').grid(
-            row=11, column=0, columnspan=4, sticky=(tk.W, tk.E), pady=8
-        )
+        ttk.Separator(task_frame, orient='horizontal').grid(row=8, column=0, columnspan=6, sticky=(tk.W, tk.E), pady=3)
 
-        # Row 12: Duplicate Policy (bold label)
-        ttk.Label(task_frame, text="Duplicate Policy:", font=("Segoe UI", 9, "bold")).grid(
-            row=12, column=0, sticky=tk.W
-        )
-        self.policy_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 9))
-        self.policy_label.grid(row=12, column=1, sticky=tk.W, columnspan=3, padx=5)
+        # Row 9: Policy and Token in one row
+        ttk.Label(task_frame, text="Policy:", font=("Segoe UI", 8, "bold")).grid(row=9, column=0, sticky=tk.W)
+        self.policy_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8))
+        self.policy_label.grid(row=9, column=1, sticky=tk.W, columnspan=2, padx=(0, 5))
 
-        # Row 13: Confirmation Token
-        ttk.Label(task_frame, text="Token:", font=("Segoe UI", 9, "bold")).grid(
-            row=13, column=0, sticky=tk.W
-        )
-        self.token_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 9), wraplength=600)
-        self.token_label.grid(row=13, column=1, sticky=tk.W, columnspan=3, padx=5)
+        ttk.Label(task_frame, text="Token:", font=("Segoe UI", 8, "bold")).grid(row=9, column=3, sticky=tk.W)
+        self.token_label = ttk.Label(task_frame, text="--", font=("Segoe UI", 8), wraplength=250)
+        self.token_label.grid(row=9, column=4, sticky=tk.W, columnspan=2)
 
     def create_control_panel(self, parent):
-        """Create the control buttons panel."""
+        """Create the control buttons panel - compact buttons."""
         control_frame = ttk.Frame(parent)
-        control_frame.grid(row=5, column=0, columnspan=2, pady=10)
+        control_frame.grid(row=5, column=0, columnspan=2, pady=5)
 
         # Start button
         self.start_button = ttk.Button(
             control_frame,
-            text="▶ Start Service",
+            text="▶ Start",
             command=self.start_service,
-            width=20
+            width=12
         )
-        self.start_button.grid(row=0, column=0, padx=5)
+        self.start_button.grid(row=0, column=0, padx=3)
 
         # Stop button
         self.stop_button = ttk.Button(
             control_frame,
-            text="⏹ Stop Service",
+            text="⏹ Stop",
             command=self.stop_service,
             state=tk.DISABLED,
-            width=20
+            width=12
         )
-        self.stop_button.grid(row=0, column=1, padx=5)
+        self.stop_button.grid(row=0, column=1, padx=3)
 
         # Clear stats button
         self.clear_button = ttk.Button(
             control_frame,
-            text="🗑 Clear Stats",
+            text="🗑 Clear",
             command=self.clear_stats,
-            width=20
+            width=12
         )
-        self.clear_button.grid(row=0, column=2, padx=5)
+        self.clear_button.grid(row=0, column=2, padx=3)
+
+        # Contable-capture toggle. Flips config.CONTABLE_CAPTURE_ENABLED live
+        # (read per-operation by the processors), so it takes effect on the
+        # next operation without restarting the consumer.
+        self.capture_enabled_var = tk.BooleanVar(value=False)
+        self.capture_check = ttk.Checkbutton(
+            control_frame,
+            text="📄 Capturar contable (ADO/PMP)",
+            variable=self.capture_enabled_var,
+            command=self.on_toggle_capture
+        )
+        self.capture_check.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(8, 0))
+
+        # Explains current state + the producer requirement.
+        self.capture_status_label = ttk.Label(
+            control_frame,
+            text="",
+            font=("Segoe UI", 8),
+            wraplength=520,
+            justify=tk.LEFT
+        )
+        self.capture_status_label.grid(row=2, column=0, columnspan=3, sticky=tk.W)
 
     def create_log_panel(self, parent):
-        """Create the log display panel."""
-        log_frame = ttk.LabelFrame(parent, text="📝 Activity Log", padding="5")
-        log_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=5)
+        """Create the log display panel - compact height for small screens."""
+        log_frame = ttk.LabelFrame(parent, text="📝 Activity Log", padding="3")
+        log_frame.grid(row=6, column=0, columnspan=2, sticky=(tk.W, tk.E, tk.N, tk.S), pady=3)
 
-        # Log text widget with scrollbar
+        # Log text widget with scrollbar - reduced height and font size
         self.log_text = scrolledtext.ScrolledText(
             log_frame,
             wrap=tk.WORD,
-            width=80,
-            height=15,
-            font=("Consolas", 9),
+            width=70,
+            height=8,
+            font=("Consolas", 8),
             state=tk.DISABLED
         )
         self.log_text.pack(fill=tk.BOTH, expand=True)
 
-        # Configure log text tags for colors
-        self.log_text.tag_config("INFO", foreground="black")
-        self.log_text.tag_config("WARNING", foreground="orange")
-        self.log_text.tag_config("ERROR", foreground="red")
-        self.log_text.tag_config("CRITICAL", foreground="dark red")
-        self.log_text.tag_config("DEBUG", foreground="gray")
+        # Configure log text tags: color + continuation-line indent for wrapped entries
+        _log_font = tkfont.Font(family="Consolas", size=8)
+        _prefix_px = _log_font.measure("12:34:56 [W] ")
+        self.log_text.tag_config("INFO",     foreground="black",    lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("WARNING",  foreground="orange",   lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("ERROR",    foreground="red",      lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("CRITICAL", foreground="dark red", lmargin2=_prefix_px, spacing1=2)
+        self.log_text.tag_config("DEBUG",    foreground="gray",     lmargin2=_prefix_px, spacing1=2)
 
     def start_service(self):
         """Start the consumer service in a background thread."""
@@ -911,6 +914,108 @@ class GastosGUI:
         """Clear statistics."""
         status_manager.reset_stats()
         status_manager.add_log("Statistics cleared", "INFO")
+
+    # --- Contable-capture toggle -------------------------------------------
+
+    def gui_settings_path(self):
+        """Path to the GUI's persisted settings file (next to config.py)."""
+        if getattr(sys, 'frozen', False):
+            base = os.path.dirname(sys.executable)
+        else:
+            base = os.path.dirname(os.path.abspath(__file__))
+        return os.path.join(base, 'gui_settings.json')
+
+    def load_gui_settings(self):
+        """Load persisted GUI settings; empty dict on any error."""
+        try:
+            with open(self.gui_settings_path(), 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def save_gui_settings(self, settings):
+        """Persist GUI settings (best-effort)."""
+        try:
+            with open(self.gui_settings_path(), 'w', encoding='utf-8') as f:
+                json.dump(settings, f, indent=2)
+        except Exception as e:
+            status_manager.add_log(f"Could not save GUI settings: {e}", "WARNING")
+
+    def get_capture_enabled(self):
+        """Current live value of config.CONTABLE_CAPTURE_ENABLED."""
+        try:
+            import config
+            return bool(getattr(config, 'CONTABLE_CAPTURE_ENABLED', False))
+        except Exception:
+            return False
+
+    def set_capture_enabled(self, enabled):
+        """Mutate the live config flag the processors read per-operation."""
+        try:
+            import config
+            config.CONTABLE_CAPTURE_ENABLED = bool(enabled)
+            return True
+        except Exception as e:
+            status_manager.add_log(f"Could not apply capture setting: {e}", "ERROR")
+            return False
+
+    def init_capture_toggle(self):
+        """Apply any persisted choice, then sync the checkbox to the live flag."""
+        settings = self.load_gui_settings()
+        if 'contable_capture_enabled' in settings:
+            self.set_capture_enabled(settings['contable_capture_enabled'])
+        self.capture_enabled_var.set(self.get_capture_enabled())
+        self.update_capture_label()
+
+    def update_capture_label(self):
+        """Reflect the current state and the producer requirement in the UI."""
+        if self.capture_enabled_var.get():
+            self.capture_status_label.config(
+                text=("ON — el productor (sical-robot) debe tener "
+                      "contableAssemblyEnabled: true, o el documento se "
+                      "captura pero nunca se fusiona/archiva."),
+                foreground="green"
+            )
+        else:
+            self.capture_status_label.config(
+                text="OFF — impresión clásica del contable dentro de SICAL.",
+                foreground="gray"
+            )
+
+    def on_toggle_capture(self):
+        """Handle the capture checkbox: apply live, persist, and inform."""
+        enabled = self.capture_enabled_var.get()
+        self.set_capture_enabled(enabled)
+
+        settings = self.load_gui_settings()
+        settings['contable_capture_enabled'] = bool(enabled)
+        self.save_gui_settings(settings)
+
+        self.update_capture_label()
+
+        if enabled:
+            status_manager.add_log(
+                "Contable capture ENABLED (ADO/PMP) — applies to the next "
+                "operation. Producer must also have contableAssemblyEnabled=true.",
+                "INFO"
+            )
+            messagebox.showinfo(
+                "Captura de contable activada",
+                "El consumidor capturará el PDF contable (ADO/PMP) desde el "
+                "Visualizador y lo devolverá a sical-robot en vez de imprimirlo "
+                "en SICAL.\n\n"
+                "IMPORTANTE — también hay que activarlo en el PRODUCTOR:\n"
+                "  sical-robot/src/data/app-settings.json\n"
+                "  \"contableAssemblyEnabled\": true\n\n"
+                "Si el productor está desactivado, el documento se captura pero "
+                "nunca se fusiona ni se archiva en portafirmas.\n\n"
+                "Nota: la ruta de guardado en SICAL (2|2|3) está SIN VERIFICAR; "
+                "valida con una operación de prueba antes de usarlo en volumen."
+            )
+        else:
+            status_manager.add_log(
+                "Contable capture DISABLED — legacy in-app SICAL print.", "INFO"
+            )
 
     def status_callback(self, event: str, **kwargs):
         """
@@ -1215,41 +1320,29 @@ class GastosGUI:
                 self.policy_label.config(text="--", foreground="gray")
                 self.token_label.config(text="--", foreground="gray")
 
-        # Update logs
+        # Update activity log (Monitor tab)
         recent_logs = status['recent_logs']
-        if recent_logs:
-            # Get current text
-            current_logs = self.log_text.get("1.0", tk.END).strip()
-            new_logs = "\n".join(recent_logs)
+        log_count = len(recent_logs)
+        if recent_logs and log_count != getattr(self, '_last_activity_log_count', -1):
+            self._last_activity_log_count = log_count
+            self.log_text.config(state=tk.NORMAL)
+            self.log_text.delete("1.0", tk.END)
 
-            # Only update if changed
-            if current_logs != new_logs:
-                self.log_text.config(state=tk.NORMAL)
-                self.log_text.delete("1.0", tk.END)
+            for log in recent_logs:
+                display_text, tag = self._format_log_for_display(log, show_timestamp=True)
+                self.log_text.insert(tk.END, display_text + "\n", tag)
 
-                for log in recent_logs:
-                    # Determine tag based on log level
-                    tag = "INFO"
-                    if "[ERROR]" in log or "[CRITICAL]" in log:
-                        tag = "ERROR"
-                    elif "[WARNING]" in log:
-                        tag = "WARNING"
-                    elif "[DEBUG]" in log:
-                        tag = "DEBUG"
+            self.log_text.see(tk.END)
+            self.log_text.config(state=tk.DISABLED)
 
-                    self.log_text.insert(tk.END, log + "\n", tag)
-
-                # Auto-scroll to bottom
-                self.log_text.see(tk.END)
-                self.log_text.config(state=tk.DISABLED)
-
-        # Update complete logs tab if it exists
+        # Update complete logs tab only when new logs arrive
         if hasattr(self, 'complete_log_text'):
-            # Only update if the logs tab is visible or auto-refresh is needed
             try:
-                self.refresh_complete_logs()
+                if log_count != getattr(self, '_last_complete_log_count', -1):
+                    self._last_complete_log_count = log_count
+                    self.refresh_complete_logs()
             except Exception:
-                pass  # Ignore errors during refresh
+                pass
 
         # Schedule next update (500ms)
         self.root.after(500, self.update_display)

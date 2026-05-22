@@ -16,6 +16,8 @@ from sical_base import (
     SicalWindowManager,
     OperationResult,
     OperationStatus,
+    contable_capture_enabled,
+    attach_contable_document,
 )
 from sical_constants import (
     SICAL_WINDOWS,
@@ -280,6 +282,17 @@ class ADO220Processor(SicalOperationProcessor):
                 # Order and pay
                 self.notify_step('Ordering payment')
                 result = self._order_and_pay(operation_data, result)
+
+                # Spec v2 (Phase B′ ext): once the operation is ordered/paid,
+                # capture the Ordenamiento (O) contable from ConOpera. The
+                # legacy 'O' print inside _order_and_pay is left untouched; this
+                # pass only runs when capture is enabled (capture-only).
+                if (contable_capture_enabled()
+                        and result.status == OperationStatus.COMPLETED
+                        and result.num_operacion):
+                    self.notify_step('Capturing Ordenamiento document')
+                    result = self._print_operation_document(
+                        result, state='O', phase='OP', confirm_with_ok=True)
 
         return result
 
@@ -589,10 +602,13 @@ class ADO220Processor(SicalOperationProcessor):
         # Forma de pago (with fallback for alternate path)
         forma_pago = find_element_with_fallback(
             ventana,
-            ADO220_FORM_PATHS['forma_pago_primary'],
-            ADO220_FORM_PATHS['forma_pago_alternate'],
+            [
+                ADO220_FORM_PATHS['forma_pago_primary'],
+                ADO220_FORM_PATHS['forma_pago_alternate'],
+            ],
             raise_error=True
         )
+        
         forma_pago.double_click(wait_time=wait_time)
         forma_pago.send_keys(keys=operation_data['fpago'], interval=0.01, wait_time=wait_time)
         forma_pago.send_keys(keys='{Enter}', wait_time=wait_time)
@@ -600,8 +616,10 @@ class ADO220Processor(SicalOperationProcessor):
         # Tipo de pago
         tipo_pago = find_element_with_fallback(
             ventana,
-            ADO220_FORM_PATHS['tipo_pago_primary'],
-            ADO220_FORM_PATHS['tipo_pago_alternate'],
+            [
+                ADO220_FORM_PATHS['tipo_pago_primary'],
+                ADO220_FORM_PATHS['tipo_pago_alternate'],
+            ],
             raise_error=True
         )
         tipo_pago.double_click(wait_time=wait_time)
@@ -611,10 +629,15 @@ class ADO220Processor(SicalOperationProcessor):
         # Caja
         caja_element = find_element_with_fallback(
             ventana,
-            ADO220_FORM_PATHS['caja_primary'],
-            ADO220_FORM_PATHS['caja_alternate'],
+            [
+                ADO220_FORM_PATHS['caja_primary'],
+                ADO220_FORM_PATHS['caja_alternate'],
+            ],
             raise_error=True
         )
+        caja_element.click(wait_time=wait_time)
+        caja_element.send_keys(keys=operation_data['caja'], interval=wait_time, wait_time=wait_time)
+            
         caja_element.click(wait_time=wait_time)
         caja_element.send_keys(keys=operation_data['caja'], interval=wait_time, wait_time=wait_time)
 
@@ -746,12 +769,21 @@ class ADO220Processor(SicalOperationProcessor):
 
         return result
 
-    def _print_operation_document(self, result: OperationResult) -> OperationResult:
+    def _print_operation_document(self, result: OperationResult, state: str = 'I',
+                                  phase: str = 'ADO', confirm_with_ok: bool = False) -> OperationResult:
         """
-        Print the operation document using the Consulta window.
+        Print/capture an operation document via the Consulta (ConOpera) window.
 
         Args:
             result: Current operation result with operation number
+            state: document-state char for the "¿En qué estado imprimirá
+                Documento?" modal — 'I' (Intervención/ADO), 'O' (Ordenamiento),
+                'P' (Pago). Only used if the modal appears.
+            phase: phase tag attached to the captured envelope ('ADO' for the
+                Intervención doc, 'OP' for the Ordenamiento doc).
+            confirm_with_ok: when True, send `state` then click the modal's OK
+                button (the post-ordering 'O' flow); when False, send `state`
+                with Enter (the legacy ADO flow).
 
         Returns:
             Updated operation result
@@ -786,17 +818,35 @@ class ADO220Processor(SicalOperationProcessor):
             # Click print button
             ventana_consulta.find(CONSULTA_FORM_PATHS['imprimir_button']).click()
 
-            # Handle document state selection if operation is already ordered
+            # Handle document state selection if the modal appears (it does once
+            # the operation is ordered). The 'O' flow confirms with an explicit
+            # OK click; the legacy 'I' flow sends Enter.
             campo_estado = ventana_consulta.find(CONSULTA_FORM_PATHS['estado_documento'], raise_error=False)
             if campo_estado:
-                campo_estado.send_keys(keys='I', interval=0.1, send_enter=True, wait_time=3.0)
+                if confirm_with_ok:
+                    campo_estado.send_keys(keys=state, interval=0.1, wait_time=1.0)
+                    ok_btn = ventana_consulta.find('class:"TButton" and name:"OK"', raise_error=False)
+                    if ok_btn:
+                        ok_btn.click(wait_time=3.0)
+                else:
+                    campo_estado.send_keys(keys=state, interval=0.1, send_enter=True, wait_time=3.0)
 
             # Handle document viewer
             ventana_visual = windows.find_window(SICAL_WINDOWS['visual_documentos'])
-            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
 
-            # Exit document viewer
-            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
+            if contable_capture_enabled():
+                # Spec v2 (Phase B′): capture the contable PDF and return it to
+                # sical-robot instead of the in-app print. Never raises;
+                # capture_and_return closes the Visualizador internally.
+                import config
+                from doc_pipeline.capture_and_return import capture_and_return
+                envelope = capture_and_return(
+                    ventana_visual, num_operacion, phase, config)
+                attach_contable_document(result, envelope)
+            else:
+                ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
+                # Exit document viewer
+                ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
 
             # Exit consulta window
             ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()

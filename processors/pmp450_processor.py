@@ -4,12 +4,13 @@ PMP450 Processor - Handles PMP450 (Gasto) operations in SICAL.
 This processor implements the workflow for PMP450 expense operations.
 It mirrors the ADO220 processor structure but uses PMP450-specific constants.
 
-TODO: Configure actual PMP450 paths when SICAL access is available.
+See CONSUMER_PMP450_PROCESSING_GUIDE.md for detailed processing specifications.
 """
 
+import re
 import time
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, Union
 from datetime import datetime
 from robocorp import windows
 
@@ -18,6 +19,8 @@ from sical_base import (
     SicalWindowManager,
     OperationResult,
     OperationStatus,
+    contable_capture_enabled,
+    attach_contable_document,
 )
 from sical_constants import (
     SICAL_WINDOWS,
@@ -90,12 +93,25 @@ class PMP450Processor(SicalOperationProcessor):
         """
         Transform operation data from v2 message format into SICAL-compatible format.
 
+        Transformations:
+        - fecha: DD/MM/YYYY → DDMMYYYY
+        - texto_sical: array → string (extract texto_ado)
+        - caja: "CODE_BANKNAME - NUMBER" → "CODE"
+        - _FIN flag: detect and set finalizar_operacion
+        - aplicaciones: transform to SICAL format
+
         Args:
             operation_data: Operation data from RabbitMQ message (v2 format)
 
         Returns:
             Transformed data compatible with SICAL processing functions
+
+        Raises:
+            ValueError: If validation fails
         """
+        # Validate input before transformation
+        self.validate_input(operation_data)
+
         # Extract texto field from texto_sical array
         texto_sical = operation_data.get('texto_sical', [])
         if texto_sical and len(texto_sical) > 0:
@@ -136,6 +152,15 @@ class PMP450Processor(SicalOperationProcessor):
             'duplicate_confirmation_token': operation_data.get('duplicate_confirmation_token'),
             'duplicate_check_id': operation_data.get('duplicate_check_id'),
         }
+    
+    def _parse_bool_or_code(self,value: Any) -> Union[bool, str]:
+        """
+        Return the value as-is if it's a digit string (e.g. '2500037'),
+        otherwise coerce to bool.
+        """
+        if (isinstance(value, str) or isinstance(value, int)) and str(value).isdigit():
+            return str(value)
+        return bool(value)
 
     def _create_aplicaciones(self, aplicaciones_data: list) -> list:
         """
@@ -167,7 +192,7 @@ class PMP450Processor(SicalOperationProcessor):
                 'cuenta': cuenta,
                 'otro': False,
                 'year': str(aplicacion.get('year', '')),
-                'contraido': bool(aplicacion.get('contraido', False)),
+                'contraido': self._parse_bool_or_code(aplicacion.get('contraido', False)),
                 'base_imponible': float(aplicacion.get('base_imponible', 0.0)),
                 'tipo': float(aplicacion.get('tipo', 0.0)),
                 'aux': str(aplicacion.get('aux', ''))
@@ -176,6 +201,124 @@ class PMP450Processor(SicalOperationProcessor):
             aplicaciones.append(aplicacion_obj)
 
         return aplicaciones
+
+    def validate_input(self, operation_data: Dict[str, Any]) -> None:
+        """
+        Validate required fields in operation data.
+
+        This method validates all required fields before processing, ensuring
+        data integrity before any SICAL window operations begin.
+
+        Args:
+            operation_data: Operation data from RabbitMQ message
+
+        Raises:
+            ValueError: If any required field is missing or invalid
+        """
+        required_fields = ['fecha', 'tercero', 'caja', 'texto_sical', 'aplicaciones']
+
+        for field in required_fields:
+            if field not in operation_data or operation_data[field] is None:
+                raise ValueError(f"Missing required field: {field}")
+
+        # Validate fecha format
+        if not self._validate_date_format(operation_data['fecha']):
+            raise ValueError(f"Invalid date format: {operation_data['fecha']}. Expected DD/MM/YYYY or DDMMYYYY")
+
+        # Validate tercero format
+        if not self._validate_tercero(operation_data['tercero']):
+            raise ValueError(f"Invalid tercero format: {operation_data['tercero']}. Must be 9 characters (letter + 8 digits or 8 digits + letter)")
+
+        # Validate aplicaciones
+        if not operation_data['aplicaciones'] or len(operation_data['aplicaciones']) == 0:
+            raise ValueError("At least one aplicación is required")
+
+        # Validate each aplicación
+        for i, aplicacion in enumerate(operation_data['aplicaciones']):
+            self._validate_aplicacion(aplicacion, i)
+
+    def _validate_date_format(self, fecha: str) -> bool:
+        """
+        Validate date is in DD/MM/YYYY or DDMMYYYY format.
+
+        Args:
+            fecha: Date string to validate
+
+        Returns:
+            True if date format is valid, False otherwise
+        """
+        if not fecha:
+            return False
+
+        # Pattern with slashes: DD/MM/YYYY
+        pattern_with_slashes = r'^\d{2}/\d{2}/\d{4}$'
+        # Pattern without slashes: DDMMYYYY
+        pattern_without_slashes = r'^\d{8}$'
+
+        if re.match(pattern_with_slashes, fecha):
+            # Validate actual date with slashes
+            try:
+                datetime.strptime(fecha, '%d/%m/%Y')
+                return True
+            except ValueError:
+                return False
+        elif re.match(pattern_without_slashes, fecha):
+            # Validate actual date without slashes
+            try:
+                datetime.strptime(fecha, '%d%m%Y')
+                return True
+            except ValueError:
+                return False
+
+        return False
+
+    def _validate_tercero(self, tercero: str) -> bool:
+        """
+        Validate tercero is exactly 9 characters with correct format.
+
+        Valid formats:
+        - Letter + 8 digits (e.g., P12345678)
+        - 8 digits + Letter (e.g., 12345678A)
+
+        Args:
+            tercero: Tercero identifier to validate
+
+        Returns:
+            True if tercero format is valid, False otherwise
+        """
+        if not tercero or len(tercero) != 9:
+            return False
+
+        # Pattern: Letter + 8 digits OR 8 digits + Letter
+        pattern1 = r'^[A-Z][0-9]{8}$'
+        pattern2 = r'^[0-9]{8}[A-Z]$'
+
+        return bool(re.match(pattern1, tercero) or re.match(pattern2, tercero))
+
+    def _validate_aplicacion(self, aplicacion: Dict, index: int) -> None:
+        """
+        Validate aplicación fields.
+
+        Args:
+            aplicacion: Aplicación data dictionary
+            index: Index of the aplicación for error messages
+
+        Raises:
+            ValueError: If any required field is missing or invalid
+        """
+        required = ['year', 'funcional', 'economica', 'importe']
+
+        for field in required:
+            if field not in aplicacion or aplicacion[field] is None:
+                raise ValueError(f"Aplicación {index}: Missing required field '{field}'")
+
+        # Validate importe is a valid number
+        try:
+            importe = float(aplicacion['importe'])
+            if importe <= 0:
+                raise ValueError(f"Aplicación {index}: importe must be greater than 0")
+        except (ValueError, TypeError):
+            raise ValueError(f"Aplicación {index}: Invalid importe value '{aplicacion['importe']}'")
 
     def setup_operation_window(self) -> bool:
         """
@@ -273,6 +416,17 @@ class PMP450Processor(SicalOperationProcessor):
                 # Order and pay
                 self.notify_step('Ordering payment')
                 result = self._order_and_pay(operation_data, result)
+
+                # Spec v2 (Phase B′ ext): once the operation is ordered/paid,
+                # capture the Ordenamiento (O) contable from ConOpera. The
+                # legacy 'O' print inside _order_and_pay is left untouched; this
+                # pass only runs when capture is enabled (capture-only).
+                if (contable_capture_enabled()
+                        and result.status == OperationStatus.COMPLETED
+                        and result.num_operacion):
+                    self.notify_step('Capturing Ordenamiento document')
+                    result = self._print_operation_document(
+                        result, state='O', phase='OP', confirm_with_ok=True)
 
         return result
 
@@ -382,7 +536,7 @@ class PMP450Processor(SicalOperationProcessor):
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
 
             else:
-                # No records found - safe to proceed
+                # No records found
                 result.similiar_records_encountered = 0
                 result.duplicate_details = []
                 result.duplicate_check_metadata = {
@@ -391,7 +545,14 @@ class PMP450Processor(SicalOperationProcessor):
                     'search_criteria': search_criteria
                 }
 
-                self.logger.info('No similar records found - proceeding with operation')
+                # Handle check_only policy: return COMPLETED without creating operation
+                if duplicate_policy == 'check_only':
+                    self.logger.info('check_only mode: No duplicates found - returning COMPLETED without creating operation')
+                    result.status = OperationStatus.COMPLETED
+                    result.end_time = datetime.now().isoformat()
+                else:
+                    self.logger.info('No similar records found - proceeding with operation')
+
                 filtros_window.find(COMMON_DIALOG_PATHS['ok_button']).click()
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
                 time.sleep(DEFAULT_TIMING['short_wait'])
@@ -474,9 +635,10 @@ class PMP450Processor(SicalOperationProcessor):
                 'importe_max': first_app['importe']
             })
 
-            funcional_field = filtros_window.find(FILTROS_FORM_PATHS['funcional'])
-            funcional_field.double_click()
-            funcional_field.send_keys(first_app['funcional'], interval=0.01, wait_time=wait_time, send_enter=True)
+            #Dont ckeck funcional in no presupuestary operations.
+            #funcional_field = filtros_window.find(FILTROS_FORM_PATHS['funcional'])
+            #funcional_field.double_click()
+            #funcional_field.send_keys(first_app['funcional'], interval=0.01, wait_time=wait_time, send_enter=True)
 
             economica_field = filtros_window.find(FILTROS_FORM_PATHS['economica'])
             economica_field.double_click()
@@ -520,10 +682,16 @@ class PMP450Processor(SicalOperationProcessor):
         try:
             # Initialize form - click "Nuevo" button
             ventana.find(PMP450_FORM_PATHS['nuevo_button']).click()
-            modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'], raise_error=True)
-            modal_confirm.find(COMMON_DIALOG_PATHS['confirm_ok']).click()
+            button_nuevo_ok_confirm = ventana.find(PMP450_FORM_PATHS['nuevo_ok_button'], raise_error=True)
+            button_nuevo_ok_confirm.click()
+             # Check for select anuality on year-start
+            anuanity_select = ventana.find('class:"TDBComboBox" and path:"4|3|3|1"', timeout=0.3, raise_error=False)
 
-            # Fill operation code - PMP450 uses code 450
+            if anuanity_select:
+                anuanity_select.click(wait_time=default_wait)
+                anuanity_select.send_keys(keys=operation_data['fecha'][-4:], wait_time=default_wait)
+                anuanity_select.send_keys(keys='{Enter}', wait_time=default_wait)
+
             cod_op_element = ventana.find(PMP450_FORM_PATHS['cod_operacion']).click(wait_time=default_wait)
             cod_op_element.send_keys(keys=OPERATION_CODES['pmp450'], interval=0.05, wait_time=default_wait)
             cod_op_element.send_keys(keys='{Enter}', wait_time=default_wait)
@@ -573,13 +741,19 @@ class PMP450Processor(SicalOperationProcessor):
         tercero_element.send_keys(operation_data['tercero'], interval=0.05, wait_time=wait_time)
 
         # Tesoreria checkbox
-        ventana.find(PMP450_FORM_PATHS['tesoreria_check']).click(wait_time=wait_time)
+        tesoreria_check = ventana.find(PMP450_FORM_PATHS['tesoreria_check'])
+        tesoreria_check.click(wait_time=1.0)
+        tesoreria_check.send_keys(keys='{Space}', wait_time=wait_time)
 
         # Forma de pago
         forma_pago = find_element_with_fallback(
             ventana,
-            PMP450_FORM_PATHS['forma_pago_primary'],
-            PMP450_FORM_PATHS['forma_pago_alternate'],
+            [
+                PMP450_FORM_PATHS['forma_pago_primary'],
+                PMP450_FORM_PATHS['forma_pago_alternate'],
+                PMP450_FORM_PATHS['forma_pago_alternate2'],
+                PMP450_FORM_PATHS['forma_pago_alternate3'],
+            ],
             raise_error=True
         )
         forma_pago.double_click(wait_time=wait_time)
@@ -589,8 +763,12 @@ class PMP450Processor(SicalOperationProcessor):
         # Tipo de pago
         tipo_pago = find_element_with_fallback(
             ventana,
-            PMP450_FORM_PATHS['tipo_pago_primary'],
-            PMP450_FORM_PATHS['tipo_pago_alternate'],
+            [
+                PMP450_FORM_PATHS['tipo_pago_primary'],
+                PMP450_FORM_PATHS['tipo_pago_alternate'],
+                PMP450_FORM_PATHS['tipo_pago_alternate2'],
+                PMP450_FORM_PATHS['tipo_pago_alternate3'],
+            ],
             raise_error=True
         )
         tipo_pago.double_click(wait_time=wait_time)
@@ -600,8 +778,10 @@ class PMP450Processor(SicalOperationProcessor):
         # Caja
         caja_element = find_element_with_fallback(
             ventana,
-            PMP450_FORM_PATHS['caja_primary'],
-            PMP450_FORM_PATHS['caja_alternate'],
+            [
+                PMP450_FORM_PATHS['caja_primary'],
+                PMP450_FORM_PATHS['caja_alternate'],
+            ],
             raise_error=True
         )
         caja_element.click(wait_time=wait_time)
@@ -637,14 +817,13 @@ class PMP450Processor(SicalOperationProcessor):
 
             ventana.find(PMP450_FORM_PATHS['new_line_button']).click()
 
-            ventana.send_keys(keys='{Tab}', interval=0.05, wait_time=default_wait, send_enter=False)
-            ventana.send_keys(keys=aplicacion['funcional'], interval=default_wait, wait_time=default_wait, send_enter=True)
             ventana.send_keys(keys=aplicacion['economica'], interval=default_wait, wait_time=0.0, send_enter=True)
 
-            if aplicacion.get('gfa'):
-                ventana.send_keys(keys=aplicacion['gfa'], interval=default_wait, wait_time=default_wait, send_enter=True)
-
-            ventana.send_keys(keys='{Tab}', wait_time=0.05, interval=default_wait)
+            if aplicacion.get('contraido', False):
+                ventana.send_keys(keys=aplicacion['contraido'], interval=default_wait, wait_time=default_wait, send_enter=True)
+            else:
+                ventana.send_keys(keys='{Tab}', wait_time=0.05, interval=default_wait)
+                
             ventana.send_keys(keys=aplicacion['importe'], interval=0.05, wait_time=default_wait, send_enter=False)
             ventana.send_keys(keys='{Enter}', wait_time=default_wait)
 
@@ -671,12 +850,11 @@ class PMP450Processor(SicalOperationProcessor):
             self.logger.info(f'Validating PMP450 operation in window: {ventana}')
             ventana.find(PMP450_FORM_PATHS['validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
 
-            modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
-            modal_confirm.find(COMMON_DIALOG_PATHS['confirm_yes']).click()
-            time.sleep(DEFAULT_TIMING['long_wait'])
-
-            modal_info = windows.find_window(SICAL_WINDOWS['information_dialog'])
-            modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
+            #modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
+            #VALIDATION CONFIRM DIALOG in PMP450 has a different structure than ADO220, 
+            # so we need to adjust the paths. Are childen of the main window, not a separate modal.
+            ventana.find(PMP450_FORM_PATHS['confirm_validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
+            ventana.find(PMP450_FORM_PATHS['confirm_validar_button_yes']).click()
             time.sleep(DEFAULT_TIMING['long_wait'])
 
             num_operacion_field = ventana.find(PMP450_FORM_PATHS['num_operacion'], raise_error=False)
@@ -700,11 +878,17 @@ class PMP450Processor(SicalOperationProcessor):
 
         return result
 
-    def _print_operation_document(self, result: OperationResult) -> OperationResult:
+    def _print_operation_document(self, result: OperationResult, state: str = 'I',
+                                  phase: str = 'PMP', confirm_with_ok: bool = False) -> OperationResult:
         """
-        Print the operation document.
+        Print/capture an operation document via the Consulta (ConOpera) window.
 
-        Uses the same printing mechanism as ADO220 via Consulta window.
+        Uses the same mechanism as ADO220. `state` is the document-state char
+        for the "¿En qué estado imprimirá Documento?" modal ('I' Intervención,
+        'O' Ordenamiento, 'P' Pago); `phase` tags the captured envelope ('PMP'
+        for the Intervención doc, 'OP' for the Ordenamiento doc); when
+        `confirm_with_ok` is True the modal is confirmed with an OK click
+        instead of Enter (the post-ordering 'O' flow).
         """
         num_operacion = result.num_operacion
         if not num_operacion:
@@ -735,11 +919,29 @@ class PMP450Processor(SicalOperationProcessor):
 
             campo_estado = ventana_consulta.find(CONSULTA_FORM_PATHS['estado_documento'], raise_error=False)
             if campo_estado:
-                campo_estado.send_keys(keys='I', interval=0.1, send_enter=True, wait_time=3.0)
+                if confirm_with_ok:
+                    campo_estado.send_keys(keys=state, interval=0.1, wait_time=1.0)
+                    ok_btn = ventana_consulta.find('class:"TButton" and name:"OK"', raise_error=False)
+                    if ok_btn:
+                        ok_btn.click(wait_time=3.0)
+                else:
+                    campo_estado.send_keys(keys=state, interval=0.1, send_enter=True, wait_time=3.0)
 
             ventana_visual = windows.find_window(SICAL_WINDOWS['visual_documentos'])
-            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
-            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
+
+            if contable_capture_enabled():
+                # Spec v2 (Phase B′): capture the contable PDF and return it to
+                # sical-robot instead of the in-app print. Never raises;
+                # capture_and_return closes the Visualizador internally.
+                import config
+                from doc_pipeline.capture_and_return import capture_and_return
+                envelope = capture_and_return(
+                    ventana_visual, num_operacion, phase, config)
+                attach_contable_document(result, envelope)
+            else:
+                ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
+                ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
+
             ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
 
             f_menu_sical = windows.find_window(SICAL_WINDOWS['main_menu'])

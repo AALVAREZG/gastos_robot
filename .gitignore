@@ -1,16 +1,16 @@
-
+*__pycache__/
 venv/
 temp/
 .rpa/
 .idea/
 .ipynb_checkpoints/
-.ipynb
+*.ipynb
 */.ipynb_checkpoints/*
 .virtual_documents/
 */.virtual_documents/*
 .vscode
 .DS_Store
-*.pyc
+*.pycgit
 *.zip
 */work-items-out/*
 testrun/*
@@ -24,3 +24,10 @@ output/
 
 # Task history database
 gastos_task_history.db
+
+# distribution files
+dist/
+build/
+
+# SICAL contable capture workdir (runtime PDF output)
+data/doc_work/

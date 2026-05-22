@@ -336,8 +336,37 @@ def send_keys_with_validation(
         logger.error(f'Failed to send keys to {element_path}: {e}')
         return False
 
-
 def find_element_with_fallback(
+    window: Any,
+    paths: list[str],
+    raise_error: bool = True
+) -> Optional[Any]:
+    """
+    Find an element by trying each path in order, returning the first match.
+
+    Args:
+        window: Window to search in
+        paths: Ordered list of element paths to try (primary first, then fallbacks)
+        raise_error: Whether to raise error if no path resolves to an element
+
+    Returns:
+        Element if found, None otherwise (or raises if raise_error=True)
+    """
+    if not paths:
+        raise ValueError("At least one path must be provided")
+
+    *candidates, last = paths
+
+    for path in candidates:
+        element = window.find(path, raise_error=False)
+        if element:
+            return element
+
+    # Delegate raise_error responsibility to the final attempt
+    return window.find(last, raise_error=raise_error)
+
+
+def find_element_with_fallback_old(
     window: Any,
     primary_path: str,
     fallback_path: str,
