@@ -19,6 +19,8 @@ from sical_base import (
     SicalWindowManager,
     OperationResult,
     OperationStatus,
+    contable_capture_enabled,
+    attach_contable_document,
 )
 from sical_constants import (
     SICAL_WINDOWS,
@@ -414,6 +416,17 @@ class PMP450Processor(SicalOperationProcessor):
                 # Order and pay
                 self.notify_step('Ordering payment')
                 result = self._order_and_pay(operation_data, result)
+
+                # Spec v2 (Phase B′ ext): once the operation is ordered/paid,
+                # capture the Ordenamiento (O) contable from ConOpera. The
+                # legacy 'O' print inside _order_and_pay is left untouched; this
+                # pass only runs when capture is enabled (capture-only).
+                if (contable_capture_enabled()
+                        and result.status == OperationStatus.COMPLETED
+                        and result.num_operacion):
+                    self.notify_step('Capturing Ordenamiento document')
+                    result = self._print_operation_document(
+                        result, state='O', phase='OP', confirm_with_ok=True)
 
         return result
 
@@ -865,11 +878,17 @@ class PMP450Processor(SicalOperationProcessor):
 
         return result
 
-    def _print_operation_document(self, result: OperationResult) -> OperationResult:
+    def _print_operation_document(self, result: OperationResult, state: str = 'I',
+                                  phase: str = 'PMP', confirm_with_ok: bool = False) -> OperationResult:
         """
-        Print the operation document.
+        Print/capture an operation document via the Consulta (ConOpera) window.
 
-        Uses the same printing mechanism as ADO220 via Consulta window.
+        Uses the same mechanism as ADO220. `state` is the document-state char
+        for the "¿En qué estado imprimirá Documento?" modal ('I' Intervención,
+        'O' Ordenamiento, 'P' Pago); `phase` tags the captured envelope ('PMP'
+        for the Intervención doc, 'OP' for the Ordenamiento doc); when
+        `confirm_with_ok` is True the modal is confirmed with an OK click
+        instead of Enter (the post-ordering 'O' flow).
         """
         num_operacion = result.num_operacion
         if not num_operacion:
@@ -900,11 +919,29 @@ class PMP450Processor(SicalOperationProcessor):
 
             campo_estado = ventana_consulta.find(CONSULTA_FORM_PATHS['estado_documento'], raise_error=False)
             if campo_estado:
-                campo_estado.send_keys(keys='I', interval=0.1, send_enter=True, wait_time=3.0)
+                if confirm_with_ok:
+                    campo_estado.send_keys(keys=state, interval=0.1, wait_time=1.0)
+                    ok_btn = ventana_consulta.find('class:"TButton" and name:"OK"', raise_error=False)
+                    if ok_btn:
+                        ok_btn.click(wait_time=3.0)
+                else:
+                    campo_estado.send_keys(keys=state, interval=0.1, send_enter=True, wait_time=3.0)
 
             ventana_visual = windows.find_window(SICAL_WINDOWS['visual_documentos'])
-            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
-            ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
+
+            if contable_capture_enabled():
+                # Spec v2 (Phase B′): capture the contable PDF and return it to
+                # sical-robot instead of the in-app print. Never raises;
+                # capture_and_return closes the Visualizador internally.
+                import config
+                from doc_pipeline.capture_and_return import capture_and_return
+                envelope = capture_and_return(
+                    ventana_visual, num_operacion, phase, config)
+                attach_contable_document(result, envelope)
+            else:
+                ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['imprimir_button']).click()
+                ventana_visual.find(VISUAL_DOCUMENTOS_PATHS['salir_button']).click()
+
             ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
 
             f_menu_sical = windows.find_window(SICAL_WINDOWS['main_menu'])
