@@ -28,3 +28,6 @@ gastos_task_history.db
 # distribution files
 dist/
 build/
+
+# SICAL contable capture workdir (runtime PDF output)
+data/doc_work/

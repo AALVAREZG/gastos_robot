@@ -67,6 +67,12 @@ class OperationResult:
     # Security: Confirmation tokens for force_create
     duplicate_confirmation_token: Optional[str] = None
     duplicate_token_expires_at: Optional[float] = None
+    # Contable-document capture (spec v2 — Phase B′). Status of the latest
+    # captured phase document; the base64 payload(s) travel out-of-band as
+    # `result._contable_documents` (a list, set via attach_contable_document)
+    # so they don't bloat dataclasses.asdict / OperationEncoder.
+    capture_status: Optional[str] = None  # 'CAPTURED' | 'FAILED'
+    capture_error: Optional[str] = None
 
 
 class OperationEncoder(json.JSONEncoder):
@@ -92,8 +98,46 @@ class OperationEncoder(json.JSONEncoder):
                 'duplicate_check_metadata': obj.duplicate_check_metadata,
                 'duplicate_confirmation_token': obj.duplicate_confirmation_token,
                 'duplicate_token_expires_at': obj.duplicate_token_expires_at,
+                'capture_status': obj.capture_status,
+                'capture_error': obj.capture_error,
             }
         return super().default(obj)
+
+
+# =============================================================================
+# CONTABLE-DOCUMENT CAPTURE HELPERS (spec v2 — Phase B′ gasto)
+# =============================================================================
+
+def contable_capture_enabled() -> bool:
+    """True when the consumer should capture contable documents.
+
+    Reads CONTABLE_CAPTURE_ENABLED from config.py (config_loader installs the
+    loaded module as ``config`` in sys.modules). Defaults to False on any
+    error so a misconfiguration never breaks the SICAL operation.
+    """
+    try:
+        import config
+        return bool(getattr(config, 'CONTABLE_CAPTURE_ENABLED', False))
+    except Exception:
+        return False
+
+
+def attach_contable_document(result: 'OperationResult', envelope: dict) -> 'OperationResult':
+    """Stash a captured contable envelope on the result (out-of-band).
+
+    Appends to ``result._contable_documents`` (created on first use) and
+    mirrors the latest capture status/error onto the dataclass fields. The
+    consumer reads ``_contable_documents`` via getattr and puts it on the
+    result message as the top-level ``contable_documents`` array.
+    """
+    docs = getattr(result, '_contable_documents', None)
+    if docs is None:
+        docs = []
+        setattr(result, '_contable_documents', docs)
+    docs.append(envelope)
+    result.capture_status = envelope.get('capture_status')
+    result.capture_error = envelope.get('capture_error')
+    return result
 
 
 # =============================================================================

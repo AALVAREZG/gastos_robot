@@ -1,7 +1,26 @@
 # RabbitMQ Configuration
 # Copy this file to config.py and fill in your actual values
 
+import os
+
 RABBITMQ_HOST = 'localhost'
 RABBITMQ_PORT = 5672
 RABBITMQ_USER = 'guest'
 RABBITMQ_PASS = 'guest'
+
+
+# Contable-document capture (spec v2 — Phase B′ gasto). See config.py for
+# details. Default OFF; the gasto capture UI is UNVERIFIED.
+def _as_bool(value, default=False):
+    if value is None:
+        return default
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+CONTABLE_CAPTURE_ENABLED = _as_bool(
+    os.getenv('CONTABLE_CAPTURE_ENABLED', 'false'), False)
+SICAL_PDF_WORKDIR = os.getenv(
+    'SICAL_PDF_WORKDIR',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data', 'doc_work'),
+)
+MAX_INLINE_BYTES = int(os.getenv('MAX_INLINE_BYTES', 2 * 1024 * 1024))
