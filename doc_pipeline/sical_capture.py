@@ -20,6 +20,8 @@ import time
 
 from robocorp import windows
 
+from sical_ui_utils import wait_for_window
+
 logger = logging.getLogger(__name__)
 
 
@@ -50,8 +52,7 @@ def close_visualizador(visor=None, attempts=3):
     """
     for i in range(attempts):
         try:
-            win = windows.find_window(
-                _VISOR_REGEX, timeout=2.0, raise_error=False) or visor
+            win = wait_for_window(_VISOR_REGEX, timeout=2.0) or visor
             if win is None:
                 return  # already closed
 
@@ -82,8 +83,7 @@ def close_visualizador(visor=None, attempts=3):
                 "close Visualizador attempt %d/%d failed: %s",
                 i + 1, attempts, exc)
 
-        still_open = windows.find_window(
-            _VISOR_REGEX, timeout=1.0, raise_error=False)
+        still_open = wait_for_window(_VISOR_REGEX, timeout=1.0)
         if still_open is None:
             return
 
@@ -110,8 +110,7 @@ def capture_visualizador_pdf(ventana_visual, num_operacion, dest_dir):
     visor = ventana_visual
     try:
         # Re-find fresh in case the passed handle went stale; fall back to it.
-        visor = windows.find_window(
-            _VISOR_REGEX, timeout=2.0, raise_error=False) or ventana_visual
+        visor = wait_for_window(_VISOR_REGEX, timeout=2.0) or ventana_visual
         if visor is None:
             raise SicalCaptureError("Visualizador window not found")
 
@@ -119,8 +118,7 @@ def capture_visualizador_pdf(ventana_visual, num_operacion, dest_dir):
         visor.find(_GUARDAR_PDF_PATH).click()
 
         # --- UNVERIFIED: 'Guardar como' Windows dialog ----------------------
-        save_as = windows.find_window(
-            'regex:.*Guardar como', timeout=5.0, raise_error=False)
+        save_as = wait_for_window('regex:.*Guardar como', timeout=5.0)
         if save_as:
             time.sleep(2)
             save_as.find(

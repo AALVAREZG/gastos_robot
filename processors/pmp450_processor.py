@@ -48,6 +48,7 @@ from sical_utils import (
     find_element_with_fallback,
     handle_error_cleanup,
 )
+from sical_ui_utils import wait_for_window
 from sical_security import (
     get_confirmation_manager,
     get_rate_limiter,
@@ -475,11 +476,7 @@ class PMP450Processor(SicalOperationProcessor):
             consulta_manager.ventana_proceso.find(CONSULTA_FORM_PATHS['filtros_button']).click()
             time.sleep(DEFAULT_TIMING['medium_wait'])
 
-            filtros_window = windows.find_window(
-                SICAL_WINDOWS['filtros'],
-                timeout=1.5,
-                raise_error=False
-            )
+            filtros_window = wait_for_window(SICAL_WINDOWS['filtros'], timeout=10.0)
 
             if not filtros_window:
                 result.status = OperationStatus.FAILED
@@ -898,15 +895,13 @@ class PMP450Processor(SicalOperationProcessor):
         self.logger.info(f'Printing document for operation: {num_operacion}')
 
         try:
-            ventana_consulta = windows.find_window(
-                SICAL_WINDOWS['consulta'],
-                timeout=1.5,
-                raise_error=False
-            )
+            # Reuse Consulta window if already open; otherwise open via menu
+            # and wait up to 15s (slow appearance is common in SICAL).
+            ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=1.5)
 
             if not ventana_consulta:
                 open_menu_option(SICAL_MENU_PATHS['consulta'], self.logger)
-                ventana_consulta = windows.find_window(SICAL_WINDOWS['consulta'], raise_error=False)
+                ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=15.0)
 
             if not ventana_consulta:
                 self.logger.error('Failed to open Consulta window for printing')
@@ -927,7 +922,9 @@ class PMP450Processor(SicalOperationProcessor):
                 else:
                     campo_estado.send_keys(keys=state, interval=0.1, send_enter=True, wait_time=3.0)
 
-            ventana_visual = windows.find_window(SICAL_WINDOWS['visual_documentos'])
+            ventana_visual = wait_for_window(SICAL_WINDOWS['visual_documentos'], timeout=15.0)
+            if not ventana_visual:
+                raise windows.ElementNotFound('Visualizador de Documentos did not appear within 15s')
 
             if contable_capture_enabled():
                 # Spec v2 (Phase B′): capture the contable PDF and return it to
@@ -944,7 +941,9 @@ class PMP450Processor(SicalOperationProcessor):
 
             ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
 
-            f_menu_sical = windows.find_window(SICAL_WINDOWS['main_menu'])
+            f_menu_sical = wait_for_window(SICAL_WINDOWS['main_menu'], timeout=10.0)
+            if not f_menu_sical:
+                raise windows.ElementNotFound('SICAL main menu not reachable')
             try:
                 f_menu_sical.find('control:"TreeItemControl" and name:"CONSULTAS AVANZADAS"').double_click(wait_time=1.0)
             except windows.ActionNotPossible:
@@ -1089,7 +1088,9 @@ class PMP450Processor(SicalOperationProcessor):
         ventana.find(COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
         ventana.find(COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
 
-        ventana_imprimir = windows.find_window(SICAL_WINDOWS['print_dialog'])
+        ventana_imprimir = wait_for_window(SICAL_WINDOWS['print_dialog'], timeout=15.0)
+        if not ventana_imprimir:
+            raise windows.ElementNotFound('Print dialog did not appear within 15s')
         ventana_imprimir.find(COMMON_DIALOG_PATHS['print_accept']).click(wait_time=1.0)
 
         ventana.find(COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=0.5)

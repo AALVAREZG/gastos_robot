@@ -11,6 +11,7 @@ import logging
 from robocorp import windows
 from robocorp.tasks import task
 from sical_base import OperationEncoder, OperationResult, OperationStatus
+from sical_ui_utils import wait_for_window
 
 ###########
 ### ORDENAR Y PAGAR
@@ -41,7 +42,7 @@ class TesoreriaPagosSicalWindowManager:
         
     def find_proceso_window(self):
         nombre_ventana_tesoreriapagos = 'regex:.*SICAL II 4.2 TesPagos'
-        return windows.find_window(f'{nombre_ventana_tesoreriapagos}', raise_error=False)
+        return wait_for_window(nombre_ventana_tesoreriapagos, timeout=10.0)
     
     def close_window(self):
         if self.ventana_proceso:
@@ -233,7 +234,9 @@ def ordenar_y_pagar_operacion_gasto(ventana_proceso, datos_pago: Dict[str, Any],
                 btn_modal_confirm_firmantes = ventana_proceso.find('class:"TButton" and name:"Yes" and path:"1|2"')
                 btn_modal_confirm_firmantes.click(wait_time=0.2)
 
-                ventana_imprimir = windows.find_window('regex:.*Imprimir')
+                ventana_imprimir = wait_for_window('regex:.*Imprimir', timeout=15.0)
+                if not ventana_imprimir:
+                    raise windows.ElementNotFound('Print dialog did not appear within 15s')
                 ventana_imprimir.find('class:"Button" and name:"Aceptar" and path:"26"').click(wait_time=1.0)
 
                 btn_final_ok = ventana_proceso.find('class:"TButton" and name:"OK" and path:"1|1"')
@@ -288,7 +291,7 @@ def abrir_ventana_opcion_en_menu(menu_a_buscar):
                 'TRATAMIENTO INDIVIDUALIZADO/RESUMEN')
     rama_tesoreria_pagos = ('TESORERIA', 'GESTION DE PAGOS', 'PROCESO DE ORDENACION Y PAGO')
 
-    app = windows.find_window('regex:.*FMenuSical', raise_error=False)
+    app = wait_for_window('regex:.*FMenuSical', timeout=5.0)
     if not app:
         print('¡¡¡¡¡¡¡¡¡¡¡¡¡¡¡', 'SICAL CLOSED?????')
         return False
@@ -315,7 +318,9 @@ def retraer_todos_elementos_del_menu():
                     'TRANSACCIONES ESPECIALES', 'CONSULTAS AVANZADAS', 'FACTURAS', 
                     'OFICINA DE PRESUPUESTO', 'INVENTARIO CONTABLE']
     
-    app = windows.find_window('regex:.*FMenuSical')
+    app = wait_for_window('regex:.*FMenuSical', timeout=10.0)
+    if not app:
+        raise windows.ElementNotFound('SICAL main menu not found')
     for element in tree_elements:
         element = app.find(f'control:"TreeItemControl" and name:"{element}"',
                         search_depth=2, timeout=0.01)
@@ -325,7 +330,7 @@ def retraer_todos_elementos_del_menu():
 def handle_error_cleanup():
     """Clean up SICAL windows in case of error"""
     try:
-        modal_dialog = windows.find_window("regex:.*mtec40")
+        modal_dialog = wait_for_window("regex:.*mtec40", timeout=2.0)
         if modal_dialog:
             modal_dialog.find('class:"TButton" and name:"OK"').click()
         

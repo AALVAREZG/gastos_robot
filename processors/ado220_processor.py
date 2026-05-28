@@ -45,6 +45,7 @@ from sical_utils import (
     find_element_with_fallback,
     handle_error_cleanup,
 )
+from sical_ui_utils import wait_for_window
 from sical_security import (
     get_confirmation_manager,
     get_rate_limiter,
@@ -337,11 +338,7 @@ class ADO220Processor(SicalOperationProcessor):
             consulta_manager.ventana_proceso.find(CONSULTA_FORM_PATHS['filtros_button']).click()
             time.sleep(DEFAULT_TIMING['medium_wait'])
 
-            filtros_window = windows.find_window(
-                SICAL_WINDOWS['filtros'],
-                timeout=1.5,
-                raise_error=False
-            )
+            filtros_window = wait_for_window(SICAL_WINDOWS['filtros'], timeout=10.0)
 
             if not filtros_window:
                 result.status = OperationStatus.FAILED
@@ -540,7 +537,9 @@ class ADO220Processor(SicalOperationProcessor):
         try:
             # Initialize form - click "Nuevo" button
             ventana.find(ADO220_FORM_PATHS['nuevo_button']).click()
-            modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'], raise_error=True)
+            modal_confirm = wait_for_window(SICAL_WINDOWS['confirm_dialog'], timeout=15.0)
+            if not modal_confirm:
+                raise windows.ElementNotFound('Confirm dialog did not appear within 15s')
             modal_confirm.find(COMMON_DIALOG_PATHS['confirm_ok']).click()
             # Check for select anuality on year-start
             anuanity_select = ventana.find('class:"TDBComboBox" and path:"3|5|2"', timeout=0.3, raise_error=False)
@@ -732,17 +731,23 @@ class ADO220Processor(SicalOperationProcessor):
             ventana.find(ADO220_FORM_PATHS['validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
 
             # Confirm validation
-            modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
+            modal_confirm = wait_for_window(SICAL_WINDOWS['confirm_dialog'], timeout=15.0)
+            if not modal_confirm:
+                raise windows.ElementNotFound('Confirm validation dialog did not appear within 15s')
             modal_confirm.find(COMMON_DIALOG_PATHS['confirm_yes']).click()
             time.sleep(DEFAULT_TIMING['medium_wait'])
 
             # Acknowledge information dialog
-            modal_info = windows.find_window(SICAL_WINDOWS['information_dialog'])
+            modal_info = wait_for_window(SICAL_WINDOWS['information_dialog'], timeout=15.0)
+            if not modal_info:
+                raise windows.ElementNotFound('Information dialog did not appear within 15s')
             modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
             time.sleep(DEFAULT_TIMING['medium_wait'])
 
             # Decline documentation attach (for now)
-            modal_attach = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
+            modal_attach = wait_for_window(SICAL_WINDOWS['confirm_dialog'], timeout=15.0)
+            if not modal_attach:
+                raise windows.ElementNotFound('Attach-document dialog did not appear within 15s')
             modal_attach.find(COMMON_DIALOG_PATHS['no_button']).click()
             time.sleep(DEFAULT_TIMING['medium_wait'])
 
@@ -796,16 +801,13 @@ class ADO220Processor(SicalOperationProcessor):
         self.logger.info(f'Printing document for operation: {num_operacion}')
 
         try:
-            # Check if Consulta window is already open
-            ventana_consulta = windows.find_window(
-                SICAL_WINDOWS['consulta'],
-                timeout=1.5,
-                raise_error=False
-            )
+            # Check if Consulta window is already open; otherwise open it
+            # via the menu and wait up to 15s (slow appearance is common).
+            ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=1.5)
 
             if not ventana_consulta:
                 open_menu_option(SICAL_MENU_PATHS['consulta'], self.logger)
-                ventana_consulta = windows.find_window(SICAL_WINDOWS['consulta'], raise_error=False)
+                ventana_consulta = wait_for_window(SICAL_WINDOWS['consulta'], timeout=15.0)
 
             if not ventana_consulta:
                 self.logger.error('Failed to open Consulta window for printing')
@@ -832,7 +834,9 @@ class ADO220Processor(SicalOperationProcessor):
                     campo_estado.send_keys(keys=state, interval=0.1, send_enter=True, wait_time=3.0)
 
             # Handle document viewer
-            ventana_visual = windows.find_window(SICAL_WINDOWS['visual_documentos'])
+            ventana_visual = wait_for_window(SICAL_WINDOWS['visual_documentos'], timeout=15.0)
+            if not ventana_visual:
+                raise windows.ElementNotFound('Visualizador de Documentos did not appear within 15s')
 
             if contable_capture_enabled():
                 # Spec v2 (Phase B′): capture the contable PDF and return it to
@@ -852,7 +856,9 @@ class ADO220Processor(SicalOperationProcessor):
             ventana_consulta.find(CONSULTA_FORM_PATHS['salir_button']).click()
 
             # Collapse consultas avanzadas menu
-            f_menu_sical = windows.find_window(SICAL_WINDOWS['main_menu'])
+            f_menu_sical = wait_for_window(SICAL_WINDOWS['main_menu'], timeout=10.0)
+            if not f_menu_sical:
+                raise windows.ElementNotFound('SICAL main menu not reachable')
             try:
                 f_menu_sical.find('control:"TreeItemControl" and name:"CONSULTAS AVANZADAS"').double_click(wait_time=1.0)
             except windows.ActionNotPossible:
@@ -1024,7 +1030,9 @@ class ADO220Processor(SicalOperationProcessor):
         ventana.find(COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
 
         # Print dialog
-        ventana_imprimir = windows.find_window(SICAL_WINDOWS['print_dialog'])
+        ventana_imprimir = wait_for_window(SICAL_WINDOWS['print_dialog'], timeout=15.0)
+        if not ventana_imprimir:
+            raise windows.ElementNotFound('Print dialog did not appear within 15s')
         ventana_imprimir.find(COMMON_DIALOG_PATHS['print_accept']).click(wait_time=1.0)
 
         # Final confirmation

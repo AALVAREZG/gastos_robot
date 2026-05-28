@@ -16,6 +16,7 @@ from sical_constants import (
     DEFAULT_TIMING,
     COMMON_DIALOG_PATHS,
 )
+from sical_ui_utils import wait_for_window as _wait_for_window_shared
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
     """
     operation_logger.debug(f'Opening menu path: {menu_path}')
 
-    app = windows.find_window(SICAL_WINDOWS['main_menu'], raise_error=False)
+    app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=5.0)
     if not app:
         operation_logger.error('SICAL main menu not found - ensure SICAL is open')
         return False
@@ -50,7 +51,7 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
                 if attempt > 0:
                     operation_logger.debug(f'Retry {attempt} for menu item "{element_name}"')
                     time.sleep(DEFAULT_TIMING['medium_wait'])
-                    app = windows.find_window(SICAL_WINDOWS['main_menu'], raise_error=False)
+                    app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=5.0)
                     if not app:
                         operation_logger.error('SICAL main menu lost during navigation')
                         return False
@@ -97,7 +98,7 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
             if attempt > 0:
                 operation_logger.debug(f'Retry {attempt} for final menu option')
                 time.sleep(DEFAULT_TIMING['medium_wait'])
-                app = windows.find_window(SICAL_WINDOWS['main_menu'], raise_error=False)
+                app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=5.0)
                 if not app:
                     operation_logger.error('SICAL main menu lost during final navigation')
                     return False
@@ -145,7 +146,9 @@ def collapse_all_menu_items(operation_logger: logging.Logger) -> None:
         operation_logger: Logger instance for this operation
     """
     try:
-        app = windows.find_window(SICAL_WINDOWS['main_menu'])
+        app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=10.0)
+        if not app:
+            raise windows.ElementNotFound('SICAL main menu not found')
         operation_logger.debug('Collapsing menu tree elements')
 
         for element_name in MENU_TREE_ELEMENTS_TO_COLLAPSE:
@@ -172,7 +175,7 @@ def handle_error_cleanup(ventana_proceso: Optional[Any] = None) -> None:
     """
     try:
         # Close any error dialog that might be open
-        modal_dialog = windows.find_window(SICAL_WINDOWS['error_dialog'], raise_error=False)
+        modal_dialog = _wait_for_window_shared(SICAL_WINDOWS['error_dialog'], timeout=1.0)
         if modal_dialog:
             modal_dialog.find(COMMON_DIALOG_PATHS['ok_button']).click()
 
@@ -254,6 +257,11 @@ def wait_for_window(
     """
     Wait for a window to appear with the given pattern.
 
+    Backward-compatible shim that delegates to the shared
+    ``sical_ui_utils.wait_for_window``, which polls
+    ``windows.find_window`` with short per-call timeouts to work around
+    cases where robocorp does not honour its own ``timeout=`` parameter.
+
     Args:
         window_pattern: Regex pattern for the window name
         timeout: Maximum time to wait in seconds
@@ -262,13 +270,8 @@ def wait_for_window(
     Returns:
         Window object if found, None otherwise
     """
-    start_time = time.time()
-    while time.time() - start_time < timeout:
-        window = windows.find_window(window_pattern, raise_error=False)
-        if window:
-            return window
-        time.sleep(retry_interval)
-    return None
+    return _wait_for_window_shared(
+        window_pattern, timeout=timeout, poll_interval=retry_interval)
 
 
 def click_with_retry(

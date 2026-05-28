@@ -18,6 +18,7 @@ from robocorp import windows
 
 from sical_constants import SICAL_WINDOWS, DEFAULT_TIMING
 from sical_config import GUI_EVENTS
+from sical_ui_utils import wait_for_window
 
 
 # =============================================================================
@@ -175,7 +176,7 @@ class SicalWindowManager(ABC):
         Returns:
             Window object if found, None otherwise
         """
-        return windows.find_window(self.window_pattern, timeout=10.0, raise_error=False)
+        return wait_for_window(self.window_pattern, timeout=10.0)
 
     def close_window(self) -> None:
         """Close the managed window safely."""
