@@ -9,8 +9,14 @@ RABBITMQ_USER = 'guest'
 RABBITMQ_PASS = 'guest'
 
 
-# Contable-document capture (spec v2 — Phase B′ gasto). See config.py for
-# details. Default OFF; the gasto capture UI is UNVERIFIED.
+# Modo de documento: RESERVA, ya no interruptor.
+#
+# La decision de que hacer con el documento contable la toma ahora el productor
+# y viaja en el mensaje, en `parameters.document_mode` (ver document_mode.py y
+# `sical-robot/docs/document-robot-split-spec.md`, §4). CONTABLE_CAPTURE_ENABLED
+# solo se consulta cuando el mensaje NO trae el campo -consumidor nuevo contra
+# productor viejo-, que es lo que permite desplegar el productor primero. Se
+# retira cuando los tres consumidores entiendan el campo.
 def _as_bool(value, default=False):
     if value is None:
         return default

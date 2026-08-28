@@ -19,7 +19,6 @@ from sical_base import (
     SicalWindowManager,
     OperationResult,
     OperationStatus,
-    contable_capture_enabled,
     attach_contable_document,
 )
 from sical_constants import (
@@ -410,9 +409,21 @@ class PMP450Processor(SicalOperationProcessor):
             if result.status == OperationStatus.COMPLETED and result.num_operacion:
                 self.logger.info(f'Operation validated - Number: {result.num_operacion}')
 
-                # Print operation document
-                self.notify_step('Printing operation document')
-                result = self._print_operation_document(result)
+                # Documento de Intervencion (ADO/PMP).
+                #
+                # En `deferred` esto no se hace: el robot de operaciones no
+                # toca documentos y ni siquiera abre ConOpera. Es donde esta el
+                # ahorro -~1m10s de los 3m19s de un gasto- y es lo que cambia
+                # el invariante: operacion COMPLETED ya no significa «el
+                # documento existe», sino «el documento esta pendiente». Quien
+                # lo encola es el productor.
+                if self.touches_documents():
+                    self.notify_step('Printing operation document')
+                    result = self._print_operation_document(result)
+                else:
+                    self.logger.info(
+                        'document_mode=deferred: se omite el documento de '
+                        'Intervencion; lo encolara el productor')
 
                 # Order and pay
                 self.notify_step('Ordering payment')
@@ -422,7 +433,7 @@ class PMP450Processor(SicalOperationProcessor):
                 # capture the Ordenamiento (O) contable from ConOpera. The
                 # legacy 'O' print inside _order_and_pay is left untouched; this
                 # pass only runs when capture is enabled (capture-only).
-                if (contable_capture_enabled()
+                if (self.should_capture_contable()
                         and result.status == OperationStatus.COMPLETED
                         and result.num_operacion):
                     self.notify_step('Capturing Ordenamiento document')
@@ -554,10 +565,7 @@ class PMP450Processor(SicalOperationProcessor):
                 filtros_window.find(FILTROS_FORM_PATHS['cerrar_button']).click()
                 time.sleep(DEFAULT_TIMING['short_wait'])
 
-            result.completed_phases.append({
-                'phase': 'duplicate_check',
-                'description': f'Similar records checked: {result.similiar_records_encountered} found'
-            })
+            self.phase_clock.mark(result, 'duplicate_check', f'Similar records checked: {result.similiar_records_encountered} found')
 
         except windows.ElementNotFound as e:
             self.logger.error(f'Element not found during duplicate check: {e}')
@@ -699,10 +707,7 @@ class PMP450Processor(SicalOperationProcessor):
             # Fill aplicaciones (line items)
             result = self._fill_aplicaciones(ventana, operation_data['aplicaciones'], result)
 
-            result.completed_phases.append({
-                'phase': 'data_entry',
-                'description': 'Operation data entered into form'
-            })
+            self.phase_clock.mark(result, 'data_entry', 'Operation data entered into form')
 
             if result.status != OperationStatus.FAILED:
                 result.status = OperationStatus.COMPLETED
@@ -863,10 +868,7 @@ class PMP450Processor(SicalOperationProcessor):
             ventana.find(PMP450_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
 
             result.status = OperationStatus.COMPLETED
-            result.completed_phases.append({
-                'phase': 'validation',
-                'description': f'Operation validated: {result.num_operacion}'
-            })
+            self.phase_clock.mark(result, 'validation', f'Operation validated: {result.num_operacion}')
 
         except Exception as e:
             self.logger.error(f'Validation error: {e}')
@@ -926,7 +928,7 @@ class PMP450Processor(SicalOperationProcessor):
             if not ventana_visual:
                 raise windows.ElementNotFound('Visualizador de Documentos did not appear within 15s')
 
-            if contable_capture_enabled():
+            if self.should_capture_contable():
                 # Spec v2 (Phase B′): capture the contable PDF and return it to
                 # sical-robot instead of the in-app print. Never raises;
                 # capture_and_return closes the Visualizador internally.
@@ -949,17 +951,11 @@ class PMP450Processor(SicalOperationProcessor):
             except windows.ActionNotPossible:
                 pass
 
-            result.completed_phases.append({
-                'phase': 'printing',
-                'description': f'Print operation document ID: {num_operacion}'
-            })
+            self.phase_clock.mark(result, 'printing', f'Print operation document ID: {num_operacion}')
 
         except Exception as e:
             self.logger.error(f'Error printing document: {e}')
-            result.completed_phases.append({
-                'phase': 'printing',
-                'description': f'Print failed: {str(e)}'
-            })
+            self.phase_clock.mark(result, 'printing', f'Print failed: {str(e)}')
 
         return result
 
@@ -1061,10 +1057,7 @@ class PMP450Processor(SicalOperationProcessor):
 
             self._complete_payment_process(ventana, datos_pago)
 
-            result.completed_phases.append({
-                'phase': 'payment_ordering',
-                'description': f'Operation ordered and paid: {datos_pago["num_operacion"]}'
-            })
+            self.phase_clock.mark(result, 'payment_ordering', f'Operation ordered and paid: {datos_pago["num_operacion"]}')
 
         except Exception as e:
             self.logger.error(f'Error in order and pay: {e}')

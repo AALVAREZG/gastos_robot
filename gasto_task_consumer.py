@@ -10,10 +10,14 @@ import pika
 import json
 import dataclasses
 import logging
+import socket
 import time
 import comtypes
 from datetime import datetime
 from typing import Optional, Dict, Any, Callable
+
+import document_mode as document_mode_mod
+from rabbit_heartbeat import HeartbeatPublisher
 
 from config_loader import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from sical_base import OperationEncoder, OperationResult, OperationStatus
@@ -62,6 +66,11 @@ class GastoConsumer:
         self.status_callback: Optional[Callable] = None
         self.task_callback: Optional[Callable] = None
 
+        # Latido a RabbitMQ (spec §6.3). Los pasos ya se generaban; hasta ahora
+        # solo iban a la GUI local y se perdian.
+        self.heartbeat: Optional[HeartbeatPublisher] = None
+        self.hostname = socket.gethostname()
+
         # Connection state
         self.is_connected = False
 
@@ -92,6 +101,9 @@ class GastoConsumer:
 
             # Set QoS to handle one message at a time
             self.channel.basic_qos(prefetch_count=1)
+
+            self.heartbeat = HeartbeatPublisher(self.channel, 'gasto', self.logger)
+            self.heartbeat.declare()
 
             self.logger.info('RabbitMQ connection established successfully')
             self.is_connected = True
@@ -152,6 +164,24 @@ class GastoConsumer:
             task_id = data.get('task_id', properties.correlation_id)
             operation_type, operation_data = self._extract_operation_data(data)
 
+            # Modo de documento: una decision, tomada por el productor, que
+            # viaja en el mensaje (spec §4). El consumidor deja de tener
+            # interruptor; CONTABLE_CAPTURE_ENABLED queda como reserva para
+            # mensajes que no traigan el campo, lo que permite desplegar el
+            # productor primero.
+            doc_mode = document_mode_mod.document_mode_from_message(data)
+            if doc_mode:
+                self.logger.info(f'document_mode={doc_mode} (del mensaje)')
+            else:
+                self.logger.info(
+                    'El mensaje no trae document_mode; se usa la reserva '
+                    'CONTABLE_CAPTURE_ENABLED')
+
+            # A partir de aqui cada paso del robot sale tambien a RabbitMQ.
+            if self.heartbeat:
+                self.heartbeat.bind(properties.correlation_id, task_id=task_id)
+                self.heartbeat.beat('Task received')
+
             # BUGFIX: Merge duplicate policy fields from top-level message if present
             # Producer may send these at message root level
             for policy_field in ('duplicate_policy', 'duplicate_confirmation_token', 'duplicate_check_id'):
@@ -178,17 +208,25 @@ class GastoConsumer:
             self.logger.info(f'Processing {operation_type} operation')
 
             # Route to appropriate processor
-            result = self._process_operation(operation_type, operation_data)
+            result = self._process_operation(operation_type, operation_data,
+                                             document_mode=doc_mode)
 
             self.logger.info(f'Operation completed: {operation_type} - '
                            f'Status: {result.status.value}, '
                            f'Error: {result.error if result.error else "None"}')
 
-            # Prepare and send response
+            # Prepare and send response.
+            #
+            # `hostname` es como el productor descubre el mapa de asientos
+            # (spec §3): un asiento ES una maquina, y el asiento se descubre,
+            # no se configura -mover este consumidor a una VM nueva no exige
+            # tocar ningun JSON-.
             response = {
                 'status': result.status.value,
                 'operation_id': task_id,
-                'result': dataclasses.asdict(result)
+                'result': dataclasses.asdict(result),
+                'hostname': self.hostname,
+                'document_mode': doc_mode,
             }
 
             # Spec v2 (Phase B′): return the captured contable PDF(s) as a
@@ -214,6 +252,8 @@ class GastoConsumer:
 
             # Acknowledge message
             ch.basic_ack(delivery_tag=method.delivery_tag)
+            if self.heartbeat:
+                self.heartbeat.unbind()
             self.logger.info(f'Successfully processed message {properties.correlation_id}')
 
             # Notify GUI of completion
@@ -221,6 +261,8 @@ class GastoConsumer:
 
         except Exception as e:
             self.logger.exception(f'Error processing message: {e}')
+            if self.heartbeat:
+                self.heartbeat.unbind()
 
             # Notify GUI of failure
             if self.status_callback:
@@ -328,7 +370,8 @@ class GastoConsumer:
     def _process_operation(
         self,
         operation_type: str,
-        operation_data: Dict[str, Any]
+        operation_data: Dict[str, Any],
+        document_mode: Optional[str] = None
     ) -> OperationResult:
         """
         Route operation to appropriate processor.
@@ -345,8 +388,11 @@ class GastoConsumer:
             processor_class = OPERATION_PROCESSORS[operation_type]
             processor = processor_class(self.logger)
 
-            # Set callbacks for GUI communication
-            processor.set_callbacks(self.status_callback, self.task_callback)
+            # Set callbacks for GUI communication. El envoltorio publica el
+            # paso a RabbitMQ ademas de mandarlo a la GUI: es literalmente
+            # enganchar un callback que ya estaba definido (spec §6.3).
+            processor.set_callbacks(self.status_callback, self._task_callback_with_heartbeat)
+            processor.set_document_mode(document_mode)
 
             # Execute operation
             return processor.execute(operation_data)
@@ -365,6 +411,23 @@ class GastoConsumer:
                 sical_is_open=False,
                 error=f'Unknown operation type: {operation_type}'
             )
+
+    def _task_callback_with_heartbeat(self, event, **kwargs):
+        """
+        Publica el paso a RabbitMQ y lo reenvia a la GUI.
+
+        Cada paso rearma la ventana de silencio del productor (§6.4): pasa de
+        preguntar «¿han pasado 75 s desde que publique?» -que mata tareas
+        vivas, porque la `duration` p90 de un gasto es 3m43s- a «¿han pasado
+        75 s sin noticias de esta tarea?».
+        """
+        try:
+            if self.heartbeat and kwargs.get('step'):
+                self.heartbeat.beat(kwargs['step'])
+        except Exception as exc:  # noqa: BLE001 - un latido no tumba nada
+            self.logger.debug(f'heartbeat failed: {exc}')
+        if self.task_callback:
+            self.task_callback(event, **kwargs)
 
     def _notify_task_completion(
         self,
