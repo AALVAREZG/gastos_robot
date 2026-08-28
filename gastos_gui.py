@@ -13,6 +13,7 @@ import json
 from datetime import datetime
 from typing import Optional
 
+import gui_log_filter
 from status_manager import status_manager
 from task_history_db import get_task_history_db
 
@@ -57,16 +58,27 @@ class GastosGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def setup_logging(self):
-        """Setup logging to capture all logs for display."""
-        # Get root logger
-        root_logger = logging.getLogger()
+        """Enganchar la ventana de registro al logger raiz, solo con lo nuestro.
 
-        # Add our custom handler
+        Estaba en DEBUG y sin filtro, asi que la ventana recibia hasta el ultimo
+        mensaje interno de todas las bibliotecas del entorno -solo `fontTools`
+        trae una veintena de loggers- y empujaba fuera lo que el operador
+        estaba mirando. Ahora INFO y lista blanca (ver gui_log_filter).
+
+        La consola y el fichero siguen recibiendolo todo: cuando hay que
+        depurar de verdad, el ruido de terceros es lo que se quiere leer.
+        """
+        root = logging.getLogger()
+        # El nivel del raiz se fija aqui y no se hereda de quien llegara antes.
+        # Sin esto queda en WARNING por defecto -y nuestros INFO no se veian- o
+        # en DEBUG si alguna biblioteca llamo a basicConfig primero, que es de
+        # donde salia la inundacion. Gatean los manejadores, no el raiz.
+        root.setLevel(logging.DEBUG)
+
         gui_handler = LogHandler()
-        gui_handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(name)s - %(message)s')
-        gui_handler.setFormatter(formatter)
-        root_logger.addHandler(gui_handler)
+        gui_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
+        gui_log_filter.install(gui_handler, level=logging.INFO)
+        root.addHandler(gui_handler)
 
     def create_widgets(self):
         """Create all GUI widgets."""

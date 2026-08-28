@@ -60,6 +60,7 @@ hiddenimports = [
     # Project modules
     'config',
     'document_mode',
+    'gui_log_filter',
     'rabbit_heartbeat',
     'gastos_gui',
     'gasto_task_consumer',
