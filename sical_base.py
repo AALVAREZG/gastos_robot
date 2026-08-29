@@ -17,6 +17,7 @@ from typing import Any, Dict, Optional, Callable
 from robocorp import windows
 
 import document_mode
+import run_trace
 from sical_constants import SICAL_WINDOWS, DEFAULT_TIMING
 from sical_config import GUI_EVENTS
 from sical_ui_utils import wait_for_window
@@ -300,6 +301,9 @@ class SicalOperationProcessor(ABC):
         self.document_mode: Optional[str] = None
         # Reloj de fases (Fase 1a): cada fase empieza donde acabo la anterior.
         self.phase_clock = PhaseClock()
+        # Marca del paso anterior, para el rastro en disco.
+        self._paso_anterior_t = None
+        self._paso_anterior = None
 
     def set_document_mode(self, mode: Optional[str]) -> None:
         """Fija el modo de documento que viene en el mensaje."""
@@ -339,12 +343,27 @@ class SicalOperationProcessor(ABC):
 
     def notify_step(self, step_message: str, **kwargs) -> None:
         """
-        Notify GUI of current processing step.
+        Notify GUI of current processing step, and record it on disk.
+
+        En el rastro cada paso lleva **cuanto tardo el anterior**. Es lo que
+        convierte una lista de pasos en un diagnostico: sin esa cifra se ve
+        que el robot llego hasta cierto punto, con ella se ve donde se quedo
+        parado.
 
         Args:
             step_message: Description of current step
             **kwargs: Additional data to pass to callback
         """
+        ahora = time.time()
+        run_trace.event(
+            'step', step=step_message,
+            paso_anterior=self._paso_anterior,
+            segundos_del_anterior=None if self._paso_anterior_t is None
+            else round(ahora - self._paso_anterior_t, 3),
+            **kwargs)
+        self._paso_anterior_t = ahora
+        self._paso_anterior = step_message
+
         if self.task_callback:
             self.task_callback(GUI_EVENTS['step'], step=step_message, **kwargs)
 
@@ -501,6 +520,8 @@ class SicalOperationProcessor(ABC):
 
         init_time = datetime.now()
         self.phase_clock.reset()
+        self._paso_anterior_t = None
+        self._paso_anterior = None
         result = OperationResult(
             status=OperationStatus.PENDING,
             init_time=str(init_time),
@@ -587,6 +608,9 @@ class SicalOperationProcessor(ABC):
             self.logger.info(f'Operation processing complete - Status: {result.status.value}')
 
         except Exception as e:
+            run_trace.exception('operation_error', e,
+                                operacion=self.operation_type,
+                                num_operacion=result.num_operacion)
             self.logger.error(f'Error in {self.operation_name} operation: {e}')
             result.status = OperationStatus.FAILED
             result.error = str(e)

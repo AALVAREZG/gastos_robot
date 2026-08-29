@@ -38,6 +38,7 @@ OWN_LOGGERS = frozenset({
     'gasto_task_consumer',
     'gastos_gui',
     'rabbit_heartbeat',
+    'run_trace',
     'sical_base',
     'sical_config',
     'sical_constants',

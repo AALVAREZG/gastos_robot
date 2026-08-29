@@ -61,6 +61,7 @@ hiddenimports = [
     'config',
     'document_mode',
     'gui_log_filter',
+    'run_trace',
     'rabbit_heartbeat',
     'gastos_gui',
     'gasto_task_consumer',

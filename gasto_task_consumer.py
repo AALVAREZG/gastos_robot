@@ -18,6 +18,7 @@ from typing import Optional, Dict, Any, Callable
 
 import document_mode as document_mode_mod
 from rabbit_heartbeat import HeartbeatPublisher
+import run_trace
 
 from config_loader import RABBITMQ_HOST, RABBITMQ_PORT, RABBITMQ_USER, RABBITMQ_PASS
 from sical_base import OperationEncoder, OperationResult, OperationStatus
@@ -177,6 +178,17 @@ class GastoConsumer:
                     'El mensaje no trae document_mode; se usa la reserva '
                     'CONTABLE_CAPTURE_ENABLED')
 
+            # Rastro: el mensaje entero tal como llego. Es lo primero que hay
+            # que poder mirar cuando el resultado no cuadra.
+            run_trace.bind(task_id)
+            run_trace.event('message_in',
+                            correlation_id=properties.correlation_id,
+                            operation_type=operation_type,
+                            document_mode=doc_mode,
+                            schema_version=data.get('schema_version'),
+                            duplicate_policy=operation_data.get('duplicate_policy'),
+                            detalle=operation_data)
+
             # A partir de aqui cada paso del robot sale tambien a RabbitMQ.
             if self.heartbeat:
                 self.heartbeat.bind(properties.correlation_id, task_id=task_id)
@@ -241,6 +253,22 @@ class GastoConsumer:
                     f'document(s) to producer '
                     f'(phases: {[c.get("phase") for c in contables]})')
 
+            # Las fases con sus marcas de tiempo (Fase 1a) van al rastro tal
+            # cual: es de donde salen los tres numeros que la spec deja por
+            # medir en §9.
+            run_trace.event('result_out',
+                            status=result.status.value,
+                            num_operacion=result.num_operacion,
+                            total_operacion=result.total_operacion,
+                            duration=result.duration,
+                            error=result.error,
+                            document_mode=doc_mode,
+                            capture_status=result.capture_status,
+                            capture_error=result.capture_error,
+                            fases=result.completed_phases,
+                            contables=[{k: v for k, v in c.items() if k != 'data'}
+                                       for c in (contables or [])])
+
             ch.basic_publish(
                 exchange='',
                 routing_key=properties.reply_to,
@@ -254,12 +282,14 @@ class GastoConsumer:
             ch.basic_ack(delivery_tag=method.delivery_tag)
             if self.heartbeat:
                 self.heartbeat.unbind()
+            run_trace.unbind()
             self.logger.info(f'Successfully processed message {properties.correlation_id}')
 
             # Notify GUI of completion
             self._notify_task_completion(task_details, result, start_time)
 
         except Exception as e:
+            run_trace.exception('consumer_error', e)
             self.logger.exception(f'Error processing message: {e}')
             if self.heartbeat:
                 self.heartbeat.unbind()

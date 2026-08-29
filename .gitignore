@@ -31,3 +31,6 @@ build/
 
 # SICAL contable capture workdir (runtime PDF output)
 data/doc_work/
+
+# Rastro de ejecucion (run_trace)
+logs/

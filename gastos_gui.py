@@ -14,6 +14,7 @@ from datetime import datetime
 from typing import Optional
 
 import gui_log_filter
+import run_trace
 from status_manager import status_manager
 from task_history_db import get_task_history_db
 
@@ -79,6 +80,12 @@ class GastosGUI:
         gui_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
         gui_log_filter.install(gui_handler, level=logging.INFO)
         root.addHandler(gui_handler)
+
+        # La GUI no pasa por sical_logging.setup_logging, asi que el rastro se
+        # instala tambien aqui; init() es idempotente. Despues de enganchar el
+        # manejador, no antes: init anuncia donde escribe, y ese aviso tiene
+        # que llegar a la ventana.
+        run_trace.init('gastos')
 
     def create_widgets(self):
         """Create all GUI widgets."""
