@@ -14,12 +14,53 @@ failure here only sets capture_status=FAILED on the envelope.
 
 import base64
 import hashlib
+import re
 
 from .sical_capture import capture_visualizador_pdf, SicalCaptureError
 
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _texto_pdf(pdf_path):
+    """Texto de todas las paginas, o None si no se puede leer."""
+    try:
+        from pypdf import PdfReader
+        return '\n'.join((p.extract_text() or '') for p in PdfReader(pdf_path).pages)
+    except Exception as exc:  # noqa: BLE001
+        return None
+
+
+def nombra_operacion(pdf_path, num_operacion):
+    """
+    Es el PDF capturado el de la operacion que se pidio?
+
+    Existe porque la captura puede salir "bien" con el documento EQUIVOCADO y
+    ningun estado lo delata: si el numero se teclea en el campo que no es, la
+    consulta no cambia y SICAL reimprime la operacion que siguiera cargada. El
+    29/08/2026 se colaron asi dos documentos de la 226102358 dentro de la tarea
+    de la 226102357 -mismo tercero, indistinguibles a ojo- y llegaron hasta el
+    outbox de firma marcados CAPTURED/STAGED. Solo el contenido lo dice.
+
+    Se busca el numero como **token suelto** y no anclado a su rotulo: pypdf
+    extrae en orden de dibujo y en el Talon de Cargo el rotulo
+    "N. de Operacion:" y su valor caen en lineas distintas, asi que un patron
+    con rotulo funciona en el gasto y falla en el arqueo.
+
+    Medido sobre los 398 contables ya capturados: acepta 397 y rechaza 1, y ese
+    1 es una tarea cuyo numero GUARDADO es el que esta mal (2600540 por
+    26000540). Cero falsos negativos.
+
+    @returns True | False | None  (None = no se pudo comprobar)
+    """
+    num = str(num_operacion or '').strip()
+    if not num:
+        return None
+    txt = _texto_pdf(pdf_path)
+    if not txt or not txt.strip():
+        return None
+    return bool(re.search(r'(?<!\d)' + re.escape(num) + r'(?!\d)', txt))
 
 
 def _page_count(pdf_path):
@@ -85,6 +126,22 @@ def capture_and_return(ventana_visual, num_operacion, phase, cfg):
                 f'the consumer')
             logger.warning('CONTABLE %s: %s', phase, envelope['capture_error'])
             return envelope
+
+        # Ultima puerta antes de dar la captura por buena: que el
+        # documento hable de la operacion que se pidio. Ver
+        # `nombra_operacion`.
+        coincide = nombra_operacion(pdf_path, num_operacion)
+        if coincide is False:
+            envelope['capture_error'] = (
+                f'el PDF capturado no nombra la operacion {num_operacion}: '
+                f'es el documento de otra operacion')
+            logger.error('CONTABLE %s: %s', phase, envelope['capture_error'])
+            return envelope
+        if coincide is None:
+            # No bloquea: medido 0 de 398 contables sin capa de texto,
+            # y tumbar una captura buena por no poder leerla seria peor
+            # que el fallo del que protege.
+            logger.warning('CONTABLE %s: no se pudo comprobar que el PDF nombre la operacion %s; se acepta igual', phase, num_operacion)
 
         envelope['data'] = base64.b64encode(data).decode('ascii')
         envelope['capture_status'] = 'CAPTURED'
