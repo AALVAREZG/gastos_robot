@@ -70,13 +70,7 @@ def test_mensajes_que_no_cuadran_se_rechazan(proc, detalle, motivo):
         proc.create_operation_data(detalle)
 
 
-def test_pago_por_lista_se_rechaza_mientras_falte_el_paso_de_seleccionar(proc):
-    assert tp.PAGO_LISTA_DISPONIBLE is False
-    with pytest.raises(ValueError, match='aun no esta disponible'):
-        proc.create_operation_data({'num_lista': '57', 'fecha_pago': '01/10/2026'})
-
-
-def test_lista_solo_se_paga(proc, lista_disponible):
+def test_lista_solo_se_paga(proc):
     datos = proc.create_operation_data({'num_lista': '57', 'fecha_pago': '01/10/2026'})
     assert datos['modo'] == tp.MODO_LISTA
     assert not datos['ordenar'] and datos['pagar']
@@ -89,12 +83,104 @@ def test_un_mensaje_invalido_no_abre_sical(proc, monkeypatch):
     abierta = []
     monkeypatch.setattr(proc, 'setup_operation_window', lambda: abierta.append(1) or True)
 
-    result = proc.execute({'num_lista': '57', 'fecha_pago': '01/10/2026'})
+    result = proc.execute({'num_operacion': '1', 'num_lista': '57', 'fecha_pago': '01/10/2026'})
 
     assert result.status == OperationStatus.FAILED
-    assert 'aun no esta disponible' in result.error
+    assert 'solo uno' in result.error
     assert abierta == []
     assert result.sical_is_open is False
+
+
+# --- pago por lista contra una ventana de mentira -----------------------------
+#
+# Lo que importa en los fallos es lo que NO se hace: ni teclear la lista ni
+# validar. Se graba cada click y cada tecla.
+
+class _Control:
+    def __init__(self, nombre, grabado, items=None):
+        self.nombre = nombre
+        self._grabado = grabado
+        self._items = items
+        self.handle = 0
+        self.name = nombre
+
+    def click(self, wait_time=None):
+        self._grabado.append(('click', self.nombre))
+        return self
+
+    def send_keys(self, keys=None, **kwargs):
+        self._grabado.append(('teclas', self.nombre, keys))
+        return self
+
+    def iter_children(self, max_depth=8):
+        return iter([_Hijo(i) for i in (self._items or [])])
+
+
+class _Ventana:
+    def __init__(self, listas):
+        self.grabado = []
+        P = tp.TESORERIA_PAGOS_PATHS
+        self._controles = {
+            P[clave]: _Control(clave, self.grabado)
+            for clave in ('pagar_button', 'option_num_lista', 'cancel_operation_button',
+                          'validar_op_button', 'validar_orden_button')
+        }
+        self._controles[P['num_lista_combo']] = _Control('num_lista_combo', self.grabado, items=listas)
+
+    def find(self, locator, **kwargs):
+        return self._controles.get(locator)
+
+    def tecleado(self):
+        return [g for g in self.grabado if g[0] == 'teclas']
+
+    def pulsado(self):
+        return [g[1] for g in self.grabado if g[0] == 'click']
+
+
+def test_lista_ya_pagada_cancela_sin_teclear(monkeypatch):
+    ventana = _Ventana(listas=['58', '61'])
+    with pytest.raises(tp.ListaNoPendiente, match='57 no esta entre las pendientes'):
+        tp.pagar_lista(ventana, '57', LOG)
+
+    assert ventana.tecleado() == []
+    assert ventana.pulsado()[-1] == 'cancel_operation_button'
+    assert 'validar_op_button' not in ventana.pulsado()
+
+
+def test_lista_pendiente_sin_el_paso_de_seleccionar_cancela_sin_teclear():
+    assert tp.PAGO_LISTA_DISPONIBLE is False
+    ventana = _Ventana(listas=['0057', '58'])
+    with pytest.raises(tp.PagoListaNoDisponible, match='57 esta pendiente'):
+        tp.pagar_lista(ventana, '57', LOG)
+
+    assert ventana.tecleado() == []
+    assert ventana.pulsado()[-1] == 'cancel_operation_button'
+
+
+def test_desplegable_ilegible_sin_el_paso_de_seleccionar_cancela_sin_teclear():
+    ventana = _Ventana(listas=[])   # UI Automation sin elementos: ilegible
+    with pytest.raises(tp.PagoListaNoDisponible, match='no se ha podido comprobar'):
+        tp.pagar_lista(ventana, '57', LOG)
+
+    assert ventana.tecleado() == []
+    assert ventana.pulsado()[-1] == 'cancel_operation_button'
+
+
+def test_lista_pendiente_con_el_paso_disponible_teclea_y_valida(monkeypatch, lista_disponible):
+    monkeypatch.setattr(tp, 'seleccionar_todas_las_operaciones',
+                        lambda v: v.grabado.append(('click', 'seleccionar_todas')))
+    # El OK final es un modal que la ventana de mentira no tiene
+    monkeypatch.setattr(tp, 'find_control',
+                        lambda v, loc, **k: v.find(loc) or _Control('info_ok', v.grabado))
+    ventana = _Ventana(listas=['57'])
+
+    tp.pagar_lista(ventana, '57', LOG)
+
+    assert ('teclas', 'num_lista_combo', '57') in ventana.tecleado()
+    pulsado = ventana.pulsado()
+    assert pulsado.index('validar_op_button') < pulsado.index('seleccionar_todas') \
+        < pulsado.index('validar_orden_button')
+    assert 'cancel_operation_button' not in pulsado
 
 
 # --- proceso completo con los pasos de SICAL sustituidos ----------------------

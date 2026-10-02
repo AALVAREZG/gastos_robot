@@ -43,8 +43,11 @@ MODO_OPERACION = 'num_operacion'
 MODO_LISTA = 'num_lista'
 
 # El pago por lista tiene un paso propio -marcar todas las operaciones de la
-# lista- cuyo localizador aun no esta. Mientras sea False, `ordenarypagar`
-# rechaza el pago por lista antes de abrir SICAL.
+# lista- cuyo localizador aun no esta. Mientras sea False, el pago por lista
+# llega hasta comprobar la lista en el desplegable y cancela **antes de
+# teclearla**: recorre el camino real hasta el ultimo punto seguro y nunca paga.
+# Es lo que permite probar en SICAL el fallo -una lista ya pagada- antes que el
+# acierto.
 PAGO_LISTA_DISPONIBLE = False
 
 # Valores de estado['ordenacion'] y estado['pago']
@@ -66,8 +69,16 @@ class ErrorSicalPago(Exception):
     """SICAL se ha negado y ha dicho por que: el mensaje es su texto."""
 
 
-class ListaNoPendiente(ErrorSicalPago):
-    """La lista no esta entre las pendientes de pago. Se lanza tras cancelar el dialogo."""
+class PagoCancelado(ErrorSicalPago):
+    """Se ha cancelado el dialogo de Pagar sin teclear nada: se puede salir limpio."""
+
+
+class ListaNoPendiente(PagoCancelado):
+    """La lista no esta entre las pendientes de pago (ya pagada, o el numero no es)."""
+
+
+class PagoListaNoDisponible(PagoCancelado):
+    """La lista se podria pagar, pero falta el paso de seleccionar sus operaciones."""
 
 
 def nuevo_estado(modo: str, numero: str, fecha_ordenamiento: Optional[str] = None,
@@ -439,8 +450,8 @@ def seleccionar_todas_las_operaciones(ventana) -> None:
     hay que marcar todas sus operaciones antes de validar el pago.
 
     PENDIENTE: falta el localizador. Mientras tanto PAGO_LISTA_DISPONIBLE es
-    False y el procesador rechaza el pago por lista antes de abrir SICAL, asi
-    que aqui no se llega.
+    False y `pagar_lista` cancela antes de teclear la lista, asi que aqui no
+    se llega.
     """
     raise NotImplementedError('pago por lista: falta el paso de seleccionar todas las operaciones')
 
@@ -455,11 +466,21 @@ def pagar_lista(ventana, num_lista: str, logger: logging.Logger) -> None:
     # tecleado. Si el desplegable no se ha podido leer no hay con que
     # comprobarlo y se sigue, avisando.
     pendientes = leer_items_desplegable(combo)
-    if pendientes is None:
-        logger.warning(f'No se han podido leer las listas pendientes; se paga la {num_lista} sin comprobarla')
-    elif not any(numero_de_lista(item) == numero_de_lista(num_lista) for item in pendientes):
+    logger.info(f'Listas pendientes de pago: {pendientes}')
+    if pendientes is not None and not any(
+            numero_de_lista(item) == numero_de_lista(num_lista) for item in pendientes):
         _cancelar_dialogo(ventana)
         raise ListaNoPendiente(f'la lista {num_lista} no esta entre las pendientes de pago: {pendientes}')
+
+    if not PAGO_LISTA_DISPONIBLE:
+        _cancelar_dialogo(ventana)
+        como = 'esta pendiente' if pendientes is not None else 'no se ha podido comprobar'
+        raise PagoListaNoDisponible(
+            f'la lista {num_lista} {como}, pero el pago por lista aun no esta disponible '
+            f'(falta seleccionar todas las operaciones); se ha cancelado sin teclear nada')
+
+    if pendientes is None:
+        logger.warning(f'No se han podido leer las listas pendientes; se paga la {num_lista} sin comprobarla')
 
     # El desplegable trae ya un valor («0»): se borra antes de teclear.
     combo.click(wait_time=0.2)
@@ -483,7 +504,7 @@ def pagar_lista_y_salir(ventana, estado: dict, logger: logging.Logger,
         estado['pago'] = HECHO
         salir(ventana, tras_pago=True)
 
-    except ListaNoPendiente as e:
+    except PagoCancelado as e:
         # El dialogo ya esta cancelado: se puede salir limpio.
         estado['error_sical'] = str(e)
         try:

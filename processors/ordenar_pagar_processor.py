@@ -132,9 +132,9 @@ class OrdenarPagarProcessor(_TesoreriaPagosProcessor):
             raise ValueError('ordenarypagar: una lista ya esta ordenada; con num_lista solo se puede pagar')
         if not (ordenar or pagar):
             raise ValueError('ordenarypagar: ordenar y pagar son false; no hay nada que hacer')
-        if modo == tesoreria_pagos.MODO_LISTA and not tesoreria_pagos.PAGO_LISTA_DISPONIBLE:
-            raise ValueError('ordenarypagar: el pago por lista aun no esta disponible '
-                             '(falta el paso de seleccionar todas las operaciones)')
+        # Mientras falte el paso de seleccionar las operaciones de la lista
+        # (tesoreria_pagos.PAGO_LISTA_DISPONIBLE), el pago por lista abre SICAL
+        # pero cancela antes de teclear la lista.
 
         fecha_ordenamiento = _fecha(operation_data.get('fecha_ordenamiento'), 'fecha_ordenamiento')
         fecha_pago = _fecha(operation_data.get('fecha_pago'), 'fecha_pago')
