@@ -205,6 +205,9 @@ TESORERIA_PAGOS_PATHS = {
     # Ventana de errores de SICAL: un TMemo con el texto y Imprimir/Todos/Salir
     'ver_error_form': 'class:"TFVerError"',
     'ver_error_memo': 'class:"TMemo"',
+    # El dialogo de «Ordenar»/«Pagar» (Nº Operación / Nº Lista). Mientras esta
+    # abierto desplaza las rutas de la ventana: la fecha deja de ser 2|1|1
+    'dialogo_seleccion': 'class:"TFTesoSele"',
 }
 
 # =============================================================================

@@ -143,6 +143,10 @@ def abrir_ventana(window_manager: TesoreriaPagosWindowManager,
     window_manager.ventana_proceso = wait_for_window(window_manager.window_pattern,
                                                      timeout=ESPERA_VENTANA_S)
     logger.debug(f'Tesoreria window: {window_manager.ventana_proceso}')
+    if window_manager.ventana_proceso:
+        # Si la anterior no se dejo cerrar, SICAL devuelve esa misma: se
+        # despeja otra vez antes de empezar.
+        despejar(window_manager.ventana_proceso, logger)
     return bool(window_manager.ventana_proceso)
 
 
@@ -151,17 +155,61 @@ ESPERA_VENTANA_S = 45.0
 
 def _cerrar_si_quedo_abierta(window_manager: TesoreriaPagosWindowManager,
                              logger: logging.Logger) -> None:
-    """Sale de una Tesoreria Pagos que haya quedado abierta, con su boton «Salir»."""
+    """
+    Sale de una Tesoreria Pagos que haya quedado abierta.
+
+    Antes de «Salir» se despeja lo que tenga encima: con el dialogo de
+    seleccion abierto «Salir» no responde, SICAL devuelve la misma ventana al
+    abrirla desde el menu y el robot no encuentra la fecha (02/10/2026: habia
+    quedado abierta con el dialogo esperando el numero de operacion, y hubo que
+    cerrarla a mano).
+    """
     vieja = wait_for_window(window_manager.window_pattern, timeout=0.5)
     if not vieja:
         return
     logger.warning('Tesoreria Pagos ya estaba abierta (de una tarea anterior); se cierra antes de abrirla')
     try:
+        despejar(vieja, logger)
         salir_btn = vieja.find(TESORERIA_PAGOS_PATHS['salir_button'], timeout=1.0, raise_error=False)
         if salir_btn:
             salir_btn.click(wait_time=1.0)
     except Exception as e:
         logger.warning(f'No se pudo cerrar la Tesoreria Pagos anterior: {e}')
+
+
+def despejar(ventana, logger: logging.Logger, intentos: int = 4) -> list:
+    """
+    Cierra lo que haya encima de la ventana principal: avisos (con OK) y el
+    dialogo de seleccion (con su boton de cancelar).
+
+    Solo actua sobre lo que reconoce. El boton de cancelar va por posicion, y
+    por eso solo se pulsa con el dialogo de seleccion presente, que es donde
+    esa posicion es la suya.
+
+    Returns:
+        Lo que se ha cerrado, por orden ('aviso: <texto>' o 'dialogo de seleccion').
+    """
+    cerrado = []
+    for _ in range(intentos):
+        modal = ventana.find('class:"TMessageForm"', search_depth=2, timeout=0.3, raise_error=False)
+        if modal:
+            ok = modal.find(COMMON_DIALOG_PATHS['ok_button'], timeout=1.0, raise_error=False)
+            if not ok:
+                break
+            texto = _texto_de(modal) or modal.name
+            ok.click(wait_time=0.8)
+            cerrado.append(f'aviso: {texto}')
+            continue
+        dialogo = ventana.find(TESORERIA_PAGOS_PATHS['dialogo_seleccion'], search_depth=2,
+                               timeout=0.3, raise_error=False)
+        if dialogo:
+            _cancelar_dialogo(ventana)
+            cerrado.append('dialogo de seleccion')
+            continue
+        break
+    if cerrado:
+        logger.warning(f'Se ha despejado Tesoreria Pagos: {cerrado}')
+    return cerrado
 
 
 # Los modales de este flujo se buscan con `find_control` y no con

@@ -228,3 +228,58 @@ def test_el_boton_cerrar_de_la_barra_de_titulo_no_es_el_mensaje(monkeypatch):
 ])
 def test_mensaje_de_lo_que_copia_un_aviso_de_delphi(copiado, mensaje):
     assert tp.mensaje_de_copia(copiado) == mensaje
+
+
+class _Pulsable(_Elemento):
+    def __init__(self, nombre, pulsado, ventana=None, al_pulsar=None, **kw):
+        super().__init__(name=nombre, **kw)
+        self._pulsado = pulsado
+        self._al_pulsar = al_pulsar
+
+    def click(self, wait_time=None):
+        self._pulsado.append(self.name)
+        if self._al_pulsar:
+            self._al_pulsar()
+        return self
+
+
+def _ventana_con_restos(aviso=False, dialogo=False):
+    """Tesoreria Pagos con un aviso y/o el dialogo de seleccion encima."""
+    P = tp.TESORERIA_PAGOS_PATHS
+    pulsado = []
+    ventana = _Elemento(encuentra={})
+
+    def quitar(clave):
+        return lambda: ventana._encuentra.pop(clave, None)
+
+    if dialogo:
+        ventana._encuentra[P['dialogo_seleccion']] = _Elemento(class_name='TFTesoSele')
+        ventana._encuentra[P['cancel_operation_button']] = _Pulsable(
+            'cancelar', pulsado, al_pulsar=lambda: (quitar(P['dialogo_seleccion'])(),
+                                                   quitar(P['cancel_operation_button'])()))
+    if aviso:
+        ok = _Pulsable('ok', pulsado, al_pulsar=quitar('class:"TMessageForm"'))
+        ventana._encuentra['class:"TMessageForm"'] = _Elemento(
+            name='Error', class_name='TMessageForm',
+            hijos=[_Elemento(name='Aviso pendiente', class_name='TLabel')],
+            encuentra={tp.COMMON_DIALOG_PATHS['ok_button']: ok})
+    return ventana, pulsado
+
+
+def test_despejar_cancela_el_dialogo_de_seleccion_que_quedo_abierto():
+    # 02/10/2026: Tesoreria Pagos se quedo con el dialogo esperando el numero.
+    ventana, pulsado = _ventana_con_restos(dialogo=True)
+    assert tp.despejar(ventana, LOG) == ['dialogo de seleccion']
+    assert pulsado == ['cancelar']
+
+
+def test_despejar_cierra_antes_los_avisos_y_luego_el_dialogo():
+    ventana, pulsado = _ventana_con_restos(aviso=True, dialogo=True)
+    assert tp.despejar(ventana, LOG) == ['aviso: Aviso pendiente', 'dialogo de seleccion']
+    assert pulsado == ['ok', 'cancelar']
+
+
+def test_despejar_sin_nada_encima_no_pulsa_nada():
+    ventana, pulsado = _ventana_con_restos()
+    assert tp.despejar(ventana, LOG) == []
+    assert pulsado == []
