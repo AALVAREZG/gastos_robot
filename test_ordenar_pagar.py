@@ -299,7 +299,7 @@ def test_el_consumidor_enruta_los_tipos_nuevos():
 def test_consulta_de_listas(monkeypatch):
     proc = ListasPendientesPagoProcessor(LOG)
     monkeypatch.setattr(proc, 'setup_operation_window', lambda: True)
-    monkeypatch.setattr(tp, 'consultar_listas_pendientes', lambda v, l: ['57', '58'])
+    monkeypatch.setattr(tp, 'consultar_listas_pendientes', lambda v, f, l: ['57', '58'])
 
     result = proc.execute({})
 
@@ -310,9 +310,61 @@ def test_consulta_de_listas(monkeypatch):
 def test_consulta_de_listas_ilegible_falla(monkeypatch):
     proc = ListasPendientesPagoProcessor(LOG)
     monkeypatch.setattr(proc, 'setup_operation_window', lambda: True)
-    monkeypatch.setattr(tp, 'consultar_listas_pendientes', lambda v, l: None)
+    monkeypatch.setattr(tp, 'consultar_listas_pendientes', lambda v, f, l: None)
 
     result = proc.execute({})
 
     assert result.status == OperationStatus.FAILED
     assert result.pago['listas_pendientes'] is None
+
+
+def test_consulta_usa_hoy_si_no_trae_fecha():
+    from datetime import date
+    datos = ListasPendientesPagoProcessor(LOG).create_operation_data({})
+    assert datos['fecha'] == date.today().strftime('%d%m%Y')
+    assert ListasPendientesPagoProcessor(LOG).create_operation_data({'fecha': '01/10/2026'})['fecha'] == '01102026'
+
+
+# --- consulta de listas contra la ventana de mentira --------------------------
+
+def test_consulta_teclea_la_fecha_antes_de_pulsar_pagar_y_sale(monkeypatch):
+    # La primera prueba en SICAL pulso Pagar sin fecha y el dialogo no salio.
+    ventana = _Ventana(listas=['0', '20130213', '20260103'])
+    orden = []
+    monkeypatch.setattr(tp, 'establecer_fecha', lambda v, f: orden.append(('fecha', f)))
+    monkeypatch.setattr(tp, 'salir', lambda v, tras_pago=True: orden.append(('salir', tras_pago)))
+    monkeypatch.setattr(tp, 'find_control', lambda v, loc, **k: v.find(loc))
+
+    listas = tp.consultar_listas_pendientes(ventana, '02102026', LOG)
+
+    assert listas == ['20130213', '20260103']   # sin el «0»
+    assert orden == [('fecha', '02102026'), ('salir', False)]
+    assert ventana.pulsado()[0] == 'pagar_button'
+    assert ventana.pulsado()[-1] == 'cancel_operation_button'
+
+
+def test_si_no_aparece_el_desplegable_no_pulsa_cancelar_y_sale(monkeypatch):
+    # El boton de cancelar va por posicion: sin el dialogo podria ser otro.
+    ventana = _Ventana(listas=['57'])
+    del ventana._controles[tp.TESORERIA_PAGOS_PATHS['num_lista_combo']]
+    salidas = []
+    monkeypatch.setattr(tp, 'establecer_fecha', lambda v, f: None)
+    monkeypatch.setattr(tp, 'salir', lambda v, tras_pago=True: salidas.append(tras_pago))
+
+    def no_aparece(v, loc, **k):
+        if v.find(loc) is None:
+            raise RuntimeError(f'Could not locate control with locator: {loc!r}')
+        return v.find(loc)
+    monkeypatch.setattr(tp, 'find_control', no_aparece)
+
+    with pytest.raises(RuntimeError, match='Could not locate'):
+        tp.consultar_listas_pendientes(ventana, '02102026', LOG)
+
+    assert 'cancel_operation_button' not in ventana.pulsado()
+    assert salidas == [False]
+
+
+def test_la_lista_cero_no_cuenta_como_pendiente(monkeypatch):
+    ventana = _Ventana(listas=['0'])
+    with pytest.raises(tp.ListaNoPendiente, match=r'pendientes de pago: \[\]'):
+        tp.pagar_lista(ventana, '0000', LOG)

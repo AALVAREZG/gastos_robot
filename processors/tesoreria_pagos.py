@@ -421,25 +421,56 @@ def _desplegable_de_listas(ventana):
 
 
 def _cancelar_dialogo(ventana) -> None:
+    """
+    Cancela el dialogo de Pagar. Solo se llama con el desplegable ya
+    encontrado: el boton se localiza por su posicion y no por su nombre, y con
+    el dialogo cerrado esa posicion puede ser otro boton de la ventana.
+    """
     cancelar = ventana.find(TESORERIA_PAGOS_PATHS['cancel_operation_button'], timeout=1.0, raise_error=False)
     if cancelar:
         cancelar.click(wait_time=0.5)
 
 
+def _sin_lista_cero(items: Optional[List[str]]) -> Optional[List[str]]:
+    """El desplegable trae un «0» que no es ninguna lista."""
+    if items is None:
+        return None
+    return [item for item in items if numero_de_lista(item) != '0']
+
+
 def listas_pendientes(ventana, logger: logging.Logger) -> Optional[List[str]]:
     """Abre el dialogo de Pagar, lee las listas del desplegable y lo cancela."""
     ventana.find(TESORERIA_PAGOS_PATHS['pagar_button']).click(wait_time=0.4)
+    # Si el desplegable no aparece se lanza sin cancelar nada: no se sabe que
+    # hay en pantalla, y el boton de cancelar va por posicion.
+    combo = _desplegable_de_listas(ventana)
     try:
-        listas = leer_items_desplegable(_desplegable_de_listas(ventana))
+        listas = _sin_lista_cero(leer_items_desplegable(combo))
         logger.info(f'Listas pendientes de pago: {listas}')
         return listas
     finally:
         _cancelar_dialogo(ventana)
 
 
-def consultar_listas_pendientes(ventana, logger: logging.Logger) -> Optional[List[str]]:
-    """Las listas pendientes de pago, saliendo despues de Tesoreria Pagos."""
-    listas = listas_pendientes(ventana, logger)
+def consultar_listas_pendientes(ventana, fecha: str, logger: logging.Logger) -> Optional[List[str]]:
+    """
+    Las listas pendientes de pago, saliendo despues de Tesoreria Pagos.
+
+    Se teclea antes la fecha, como en un pago. La primera prueba en SICAL
+    (02/10/2026) pulso «Pagar» nada mas abrir la ventana y el dialogo no
+    aparecio; la siguiente, que si tecleo la fecha, lo encontro y lo leyo.
+    """
+    establecer_fecha(ventana, fecha)
+    try:
+        listas = listas_pendientes(ventana, logger)
+    except Exception:
+        # Sin el dialogo no queda nada a medias: se intenta salir para no
+        # dejar Tesoreria Pagos abierta a la tarea siguiente.
+        try:
+            salir(ventana, tras_pago=False)
+        except Exception as salida:
+            logger.warning(f'No se pudo salir de Tesoreria Pagos: {salida}')
+        raise
     salir(ventana, tras_pago=False)
     return listas
 
@@ -465,7 +496,7 @@ def pagar_lista(ventana, num_lista: str, logger: logging.Logger) -> None:
     # que impide pagar dos veces la misma lista, o pagar otra por un numero mal
     # tecleado. Si el desplegable no se ha podido leer no hay con que
     # comprobarlo y se sigue, avisando.
-    pendientes = leer_items_desplegable(combo)
+    pendientes = _sin_lista_cero(leer_items_desplegable(combo))
     logger.info(f'Listas pendientes de pago: {pendientes}')
     if pendientes is not None and not any(
             numero_de_lista(item) == numero_de_lista(num_lista) for item in pendientes):

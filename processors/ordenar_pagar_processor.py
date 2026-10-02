@@ -23,7 +23,10 @@ Mensaje (`operation_data.operation`)::
         fecha_ordenamiento          DD/MM/YYYY o DDMMYYYY
         fecha_pago                  por defecto, la de ordenacion
 
-    tipo: 'listas_pendientes_pago'  sin detalle; devuelve las listas pendientes
+    tipo: 'listas_pendientes_pago'  devuelve las listas pendientes
+    detalle:
+        fecha                       DD/MM/YYYY; por defecto, hoy. Se teclea antes
+                                    de pulsar «Pagar», como en un pago
 
 El resultado lleva en `result.pago` hasta donde llego cada paso (ver
 `tesoreria_pagos.nuevo_estado`). Con num_operacion, `result.num_operacion` es
@@ -31,7 +34,7 @@ la operacion sobre la que se actuo; con lista va vacio, y el productor no puede
 juzgar el resultado por ese campo.
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from sical_base import (
@@ -207,7 +210,8 @@ class ListasPendientesPagoProcessor(_TesoreriaPagosProcessor):
         return 'Listas pendientes de pago'
 
     def create_operation_data(self, operation_data: Dict[str, Any]) -> Dict[str, Any]:
-        return {'duplicate_policy': None}
+        fecha = _fecha(operation_data.get('fecha'), 'fecha') or date.today().strftime('%d%m%Y')
+        return {'fecha': fecha, 'duplicate_policy': None}
 
     def process_operation_form(
         self,
@@ -217,7 +221,8 @@ class ListasPendientesPagoProcessor(_TesoreriaPagosProcessor):
         ventana = self.window_manager.ventana_proceso
         self.notify_step('Reading pending payment lists')
         try:
-            listas = tesoreria_pagos.consultar_listas_pendientes(ventana, self.logger)
+            listas = tesoreria_pagos.consultar_listas_pendientes(
+                ventana, operation_data['fecha'], self.logger)
         except Exception as e:
             self.logger.error(f'Error reading pending lists: {e}')
             result.status = OperationStatus.FAILED

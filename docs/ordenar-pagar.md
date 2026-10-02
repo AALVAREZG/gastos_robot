@@ -38,7 +38,9 @@ Mismo sobre que un ADO/PMP (`operation_data.operation.tipo` / `.detalle`):
 Todo lo que no cuadra se rechaza **antes de abrir SICAL**: la tarea vuelve
 `FAILED` con el motivo en `error` y sin haber tocado nada.
 
-`listas_pendientes_pago` no lleva detalle.
+`listas_pendientes_pago` solo lleva, opcional, `fecha` (por defecto, hoy): se
+teclea antes de pulsar «Pagar», como en un pago. Sin ella, la primera prueba en
+SICAL no llegó a ver el diálogo.
 
 ## Resultado
 
@@ -75,9 +77,10 @@ y falló al ordenar o pagar, y pedir solo lo que falta: si `ordenacion` es
 `hecho` y `pago` es `pendiente`, se publica `ordenarypagar` con `ordenar: false`.
 
 `listas_pendientes_pago` devuelve
-`"pago": {"modo": "consulta_listas", "listas_pendientes": ["57", "58"]}`, tal
-como aparecen en el desplegable; `null` si no se pudo leer (y la tarea sale
-`FAILED`). Una lista vacía sí quiere decir que no hay ninguna.
+`"pago": {"modo": "consulta_listas", "listas_pendientes": ["20130213", "20260103"]}`,
+tal como aparecen en el desplegable salvo el «0» que trae siempre, que no es
+ninguna lista; `null` si no se pudo leer (y la tarea sale `FAILED`). Una lista
+vacía sí quiere decir que no hay ninguna.
 
 ## Lo que tiene que saber el productor
 

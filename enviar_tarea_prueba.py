@@ -131,11 +131,12 @@ def _consumidor_antiguo(respuesta) -> bool:
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split('\n\n')[0])
     sub = parser.add_subparsers(dest='prueba', required=True)
-    sub.add_parser('listas', help='leer las listas pendientes de pago')
+    p_listas = sub.add_parser('listas', help='leer las listas pendientes de pago')
     p_lista = sub.add_parser('lista', help='intentar pagar una lista (cancela antes de teclearla)')
     p_lista.add_argument('num_lista')
-    p_lista.add_argument('--fecha', default=date.today().strftime('%d/%m/%Y'),
-                         help='fecha de pago DD/MM/YYYY (por defecto, hoy)')
+    for p in (p_listas, p_lista):
+        p.add_argument('--fecha', default=date.today().strftime('%d/%m/%Y'),
+                       help='fecha que se teclea en Tesoreria Pagos, DD/MM/YYYY (por defecto, hoy)')
     args = parser.parse_args()
 
     if args.prueba == 'lista' and tesoreria_pagos.PAGO_LISTA_DISPONIBLE:
@@ -153,7 +154,8 @@ def main():
 
         # Siempre primero la consulta: es inocua, dice que listas hay y delata a
         # un consumidor antiguo antes de mandarle un ordenarypagar.
-        respuesta = _enviar(conexion, canal, cola_respuesta, 'listas_pendientes_pago', {})
+        respuesta = _enviar(conexion, canal, cola_respuesta, 'listas_pendientes_pago',
+                            {'fecha': args.fecha})
         if respuesta is None:
             return 1
         _mostrar(respuesta)
