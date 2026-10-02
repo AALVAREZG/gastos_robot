@@ -266,6 +266,7 @@ class _Hijo:
     def __init__(self, name, control_type='ListItemControl'):
         self.name = name
         self.control_type = control_type
+        self.class_name = ''
 
 
 class _Combo:
@@ -368,3 +369,107 @@ def test_la_lista_cero_no_cuenta_como_pendiente(monkeypatch):
     ventana = _Ventana(listas=['0'])
     with pytest.raises(tp.ListaNoPendiente, match=r'pendientes de pago: \[\]'):
         tp.pagar_lista(ventana, '0000', LOG)
+
+
+# --- comprobar el pago de una operacion, sin pagar ---------------------------
+
+def test_comprobar_no_ordena_ni_paga(proc):
+    datos = proc.create_operation_data({'num_operacion': '326100196', 'comprobar': True,
+                                        'fecha_pago': '02/10/2026'})
+    assert datos['comprobar'] and not datos['ordenar'] and not datos['pagar']
+
+
+@pytest.mark.parametrize('detalle, motivo', [
+    ({'num_lista': '57', 'comprobar': True, 'fecha_pago': '02/10/2026'}, 'solo para num_operacion'),
+    ({'num_operacion': '1', 'comprobar': True, 'pagar': True, 'fecha_pago': '02/10/2026'}, 'no ordena ni paga'),
+])
+def test_comprobar_no_se_mezcla(proc, detalle, motivo):
+    with pytest.raises(ValueError, match=motivo):
+        proc.create_operation_data(detalle)
+
+
+class _Modal:
+    def __init__(self, texto, ventana, cierra=True):
+        self.name = 'Error'
+        self.class_name = 'TMessageForm'
+        self._texto = texto
+        self._ventana = ventana
+        self._cierra = cierra
+
+    def iter_children(self, max_depth=8):
+        return iter([_Hijo(self._texto, control_type='TextControl')])
+
+    def find(self, locator, **kwargs):
+        if not self._cierra:
+            return None
+        modal = self
+
+        class _Ok:
+            def click(self, wait_time=None):
+                modal._ventana.grabado.append(('click', 'ok_aviso'))
+                modal._ventana.modales.remove(modal)
+        return _Ok()
+
+
+def _ventana_de_pago(modales_textos=(), cierra=True):
+    ventana = _Ventana(listas=[])
+    P = tp.TESORERIA_PAGOS_PATHS
+    for clave in ('option_num_operacion', 'num_operacion_input'):
+        ventana._controles[P[clave]] = _Control(clave, ventana.grabado)
+    ventana.modales = [_Modal(t, ventana, cierra) for t in modales_textos]
+    return ventana
+
+
+@pytest.fixture
+def modales(monkeypatch):
+    def buscar(v, loc, **k):
+        if 'TMessageForm' in loc:
+            return v.modales[0] if v.modales else None
+        return v.find(loc)
+    monkeypatch.setattr(tp, 'find_control', buscar)
+
+
+def test_comprobar_sin_aviso_cancela_sin_validar(modales):
+    ventana = _ventana_de_pago()
+    r = tp.comprobar_pago_operacion(ventana, '326100196', LOG)
+
+    assert r == {'acepta': True, 'aviso_sical': None, 'avisos_cerrados': 0}
+    assert ('teclas', 'num_operacion_input', '326100196') in ventana.tecleado()
+    assert ventana.pulsado()[-1] == 'cancel_operation_button'
+    assert 'validar_op_button' not in ventana.pulsado()
+    assert 'validar_orden_button' not in ventana.pulsado()
+
+
+def test_comprobar_con_aviso_lo_lee_lo_cierra_y_cancela(modales):
+    ventana = _ventana_de_pago(['La operacion ya esta pagada', 'Proceso cancelado'])
+    r = tp.comprobar_pago_operacion(ventana, '326100196', LOG)
+
+    assert r['acepta'] is False
+    assert r['aviso_sical'] == 'La operacion ya esta pagada | Proceso cancelado'
+    assert r['avisos_cerrados'] == 2
+    assert ventana.pulsado()[-1] == 'cancel_operation_button'
+    assert 'validar_op_button' not in ventana.pulsado()
+
+
+def test_comprobar_si_el_aviso_no_se_cierra_no_toca_nada_mas(modales):
+    ventana = _ventana_de_pago(['Algo raro'], cierra=False)
+    with pytest.raises(tp.ErrorSicalPago, match='Algo raro'):
+        tp.comprobar_pago_operacion(ventana, '1', LOG)
+
+    assert 'cancel_operation_button' not in ventana.pulsado()
+
+
+def test_execute_comprobar_devuelve_lo_que_dijo_sical(proc, monkeypatch):
+    monkeypatch.setattr(proc, 'setup_operation_window', lambda: True)
+
+    def comprobar(v, estado, logger):
+        estado['comprobacion'] = {'acepta': False, 'aviso_sical': 'ya pagada', 'avisos_cerrados': 1}
+        estado['error_sical'] = 'ya pagada'
+    monkeypatch.setattr(tp, 'comprobar_pago_y_salir', comprobar)
+
+    result = proc.execute({'num_operacion': '326100196', 'comprobar': True, 'fecha_pago': '02/10/2026'})
+
+    assert result.status == OperationStatus.COMPLETED, result.error
+    assert result.pago['comprobacion']['aviso_sical'] == 'ya pagada'
+    assert result.pago['ordenacion'] == tp.NO_SOLICITADO
+    assert result.pago['pago'] == tp.NO_SOLICITADO

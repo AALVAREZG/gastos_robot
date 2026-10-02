@@ -15,6 +15,11 @@ pruebas que no pagan nada:
           - si esta pendiente  -> FAILED con PagoListaNoDisponible
         En los dos casos sale de Tesoreria Pagos sin haber tocado nada.
 
+    python enviar_tarea_prueba.py comprobar 326100196 [--fecha 02/10/2026]
+        Teclea la operacion en el dialogo de «Pagar», lee el aviso de SICAL si
+        sale y CANCELA SIN VALIDAR. No ordena ni paga. Con una operacion ya
+        pagada ensena el aviso que da SICAL en ese caso.
+
 Antes de lanzarlo:
 
 - El consumidor tiene que ser el de esta rama (`python run_gui.py`), no el
@@ -134,9 +139,12 @@ def main():
     p_listas = sub.add_parser('listas', help='leer las listas pendientes de pago')
     p_lista = sub.add_parser('lista', help='intentar pagar una lista (cancela antes de teclearla)')
     p_lista.add_argument('num_lista')
-    p_lista.add_argument('--sin-consulta', action='store_true',
-                         help='no mandar antes la consulta de listas (solo si el consumidor ya es el de esta rama)')
-    for p in (p_listas, p_lista):
+    p_comprobar = sub.add_parser('comprobar', help='teclear una operacion en Pagar y cancelar sin validar')
+    p_comprobar.add_argument('num_operacion')
+    for p in (p_lista, p_comprobar):
+        p.add_argument('--sin-consulta', action='store_true',
+                       help='no mandar antes la consulta de listas (solo si el consumidor ya es el de esta rama)')
+    for p in (p_listas, p_lista, p_comprobar):
         p.add_argument('--fecha', default=date.today().strftime('%d/%m/%Y'),
                        help='fecha que se teclea en Tesoreria Pagos, DD/MM/YYYY (por defecto, hoy)')
     args = parser.parse_args()
@@ -157,8 +165,8 @@ def main():
         # Primero la consulta: es inocua, dice que listas hay y delata a un
         # consumidor antiguo antes de mandarle un ordenarypagar. Es tambien una
         # segunda apertura de Tesoreria Pagos; con --sin-consulta se omite.
-        if args.prueba == 'lista' and args.sin_consulta:
-            return _intentar_lista(conexion, canal, cola_respuesta, args, None)
+        if args.prueba != 'listas' and args.sin_consulta:
+            return _siguiente(conexion, canal, cola_respuesta, args, None)
         respuesta = _enviar(conexion, canal, cola_respuesta, 'listas_pendientes_pago',
                             {'fecha': args.fecha})
         if respuesta is None:
@@ -172,9 +180,21 @@ def main():
             return 0 if respuesta.get('status') == 'COMPLETED' else 1
 
         pendientes = ((respuesta.get('result') or {}).get('pago') or {}).get('listas_pendientes')
-        return _intentar_lista(conexion, canal, cola_respuesta, args, pendientes)
+        return _siguiente(conexion, canal, cola_respuesta, args, pendientes)
     finally:
         conexion.close()
+
+
+def _siguiente(conexion, canal, cola_respuesta, args, pendientes):
+    if args.prueba == 'comprobar':
+        respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',
+                            {'num_operacion': args.num_operacion, 'comprobar': True,
+                             'fecha_pago': args.fecha})
+        if respuesta is None:
+            return 1
+        _mostrar(respuesta)
+        return 0
+    return _intentar_lista(conexion, canal, cola_respuesta, args, pendientes)
 
 
 def _intentar_lista(conexion, canal, cola_respuesta, args, pendientes):

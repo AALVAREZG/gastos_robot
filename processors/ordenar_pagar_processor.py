@@ -20,6 +20,9 @@ Mensaje (`operation_data.operation`)::
         num_operacion | num_lista   exactamente uno de los dos
         ordenar                     por defecto true con num_operacion; con lista no cabe
         pagar                       por defecto true
+        comprobar                   solo con num_operacion: teclea el numero en
+                                    «Pagar», lee el aviso de SICAL si sale y
+                                    cancela sin validar. No ordena ni paga
         fecha_ordenamiento          DD/MM/YYYY o DDMMYYYY
         fecha_pago                  por defecto, la de ordenacion
 
@@ -128,12 +131,19 @@ class OrdenarPagarProcessor(_TesoreriaPagosProcessor):
         if not numero.isdigit() or int(numero) == 0:
             raise ValueError(f'ordenarypagar: {modo} no es un numero valido: {numero!r}')
 
+        comprobar = _booleano(operation_data.get('comprobar'), por_defecto=False)
+        if comprobar and modo != tesoreria_pagos.MODO_OPERACION:
+            raise ValueError('ordenarypagar: comprobar es solo para num_operacion '
+                             '(para listas, listas_pendientes_pago)')
         ordenar = _booleano(operation_data.get('ordenar'),
-                            por_defecto=modo == tesoreria_pagos.MODO_OPERACION)
-        pagar = _booleano(operation_data.get('pagar'), por_defecto=True)
+                            por_defecto=modo == tesoreria_pagos.MODO_OPERACION and not comprobar)
+        pagar = _booleano(operation_data.get('pagar'), por_defecto=not comprobar)
+        if comprobar and (ordenar or pagar):
+            raise ValueError('ordenarypagar: comprobar no ordena ni paga; '
+                             'no se puede pedir a la vez que ordenar o pagar')
         if modo == tesoreria_pagos.MODO_LISTA and ordenar:
             raise ValueError('ordenarypagar: una lista ya esta ordenada; con num_lista solo se puede pagar')
-        if not (ordenar or pagar):
+        if not (ordenar or pagar or comprobar):
             raise ValueError('ordenarypagar: ordenar y pagar son false; no hay nada que hacer')
         # Mientras falte el paso de seleccionar las operaciones de la lista
         # (tesoreria_pagos.PAGO_LISTA_DISPONIBLE), el pago por lista abre SICAL
@@ -151,6 +161,7 @@ class OrdenarPagarProcessor(_TesoreriaPagosProcessor):
             'numero': numero,
             'ordenar': ordenar,
             'pagar': pagar,
+            'comprobar': comprobar,
             'fecha_ordenamiento': fecha_ordenamiento,
             'fecha_pago': fecha_pago,
             'duplicate_policy': None,
@@ -180,7 +191,10 @@ class OrdenarPagarProcessor(_TesoreriaPagosProcessor):
                          f'ordenar: {operation_data["ordenar"]}, pagar: {operation_data["pagar"]}, '
                          f'fechas: {operation_data["fecha_ordenamiento"]} / {operation_data["fecha_pago"]}')
         try:
-            if modo == tesoreria_pagos.MODO_LISTA:
+            if operation_data.get('comprobar'):
+                self.notify_step('Checking payment (no se valida)')
+                tesoreria_pagos.comprobar_pago_y_salir(ventana, estado, self.logger)
+            elif modo == tesoreria_pagos.MODO_LISTA:
                 tesoreria_pagos.pagar_lista_y_salir(ventana, estado, self.logger, avisar=self.notify_step)
             else:
                 tesoreria_pagos.ordenar_y_pagar(ventana, estado, self.logger, avisar=self.notify_step)

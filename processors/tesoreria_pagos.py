@@ -385,6 +385,70 @@ def ordenar_y_pagar(ventana, estado: dict, logger: logging.Logger,
 
 
 # =============================================================================
+# Comprobar el pago de una operacion, sin pagar
+# =============================================================================
+#
+# Para saber que dice SICAL de una operacion -ya pagada, sin ordenar, no
+# existe- sin arriesgar nada: se teclea el numero en el dialogo de «Pagar»,
+# se lee el aviso si sale, y se cancela sin pulsar «Validar». Es el «fallo
+# primero» del pago por operacion: con una operacion ya pagada enseña el aviso
+# que SICAL da en ese caso, que es lo que hace falta para tratarlo bien.
+
+ESPERA_AVISO_S = 2.0
+
+
+def comprobar_pago_operacion(ventana, num_operacion: str, logger: logging.Logger) -> dict:
+    """
+    Teclea la operacion en el dialogo de Pagar y cancela sin validar.
+
+    Returns:
+        {'acepta': bool, 'aviso_sical': texto o None, 'avisos_cerrados': n}.
+        `acepta` False quiere decir que SICAL saco un aviso al teclear el numero.
+    """
+    ventana.find(TESORERIA_PAGOS_PATHS['pagar_button']).click(wait_time=0.4)
+    ventana.find(TESORERIA_PAGOS_PATHS['option_num_operacion']).click(wait_time=0.5)
+    campo = ventana.find(TESORERIA_PAGOS_PATHS['num_operacion_input']).click(wait_time=0.2)
+    # A partir de aqui el dialogo esta abierto: cancelar por posicion es seguro.
+    campo.send_keys(num_operacion, interval=0.1, wait_time=0.5, send_enter=True)
+
+    aviso = None
+    cerrados = 0
+    modal = find_control(ventana, 'class:"TMessageForm"', timeout=ESPERA_AVISO_S, raise_error=False)
+    while modal and cerrados < 3:
+        texto = _texto_de(modal) or f'«{modal.name}» (texto no legible)'
+        aviso = texto if aviso is None else f'{aviso} | {texto}'
+        ok = modal.find(COMMON_DIALOG_PATHS['ok_button'], timeout=1.0, raise_error=False)
+        if not ok:
+            break
+        ok.click(wait_time=0.8)
+        cerrados += 1
+        modal = find_control(ventana, 'class:"TMessageForm"', timeout=1.0, raise_error=False)
+
+    if modal:
+        # Queda un aviso que no se sabe cerrar: no se pulsa nada mas.
+        raise ErrorSicalPago(f'SICAL: {aviso} (el aviso sigue abierto; cierralo a mano)')
+
+    _cancelar_dialogo(ventana)
+    logger.info(f'Comprobacion de pago de {num_operacion}: '
+                f'{"SICAL lo acepta" if aviso is None else "aviso: " + aviso}')
+    return {'acepta': aviso is None, 'aviso_sical': aviso, 'avisos_cerrados': cerrados}
+
+
+def comprobar_pago_y_salir(ventana, estado: dict, logger: logging.Logger) -> dict:
+    """Teclea la fecha, comprueba la operacion de `estado` y sale. No paga nada."""
+    try:
+        establecer_fecha(ventana, estado['fecha_pago'] or estado['fecha_ordenamiento'])
+        comprobacion = comprobar_pago_operacion(ventana, estado['num_operacion'], logger)
+        estado['comprobacion'] = comprobacion
+        if comprobacion['aviso_sical']:
+            estado['error_sical'] = comprobacion['aviso_sical']
+        salir(ventana, tras_pago=False)
+        return comprobacion
+    except Exception as e:
+        _relanzar_con_error_sical(ventana, estado, e, logger)
+
+
+# =============================================================================
 # Pago por lista
 # =============================================================================
 #

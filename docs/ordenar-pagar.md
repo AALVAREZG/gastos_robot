@@ -34,6 +34,7 @@ Mismo sobre que un ADO/PMP (`operation_data.operation.tipo` / `.detalle`):
 | `pagar` | Por defecto `true` |
 | `fecha_ordenamiento` | `DD/MM/YYYY` o `DDMMYYYY`. Si falta, la de pago |
 | `fecha_pago` | Si falta, la de ordenación. Si las dos difieren, se teclea la de pago antes de pagar |
+| `comprobar` | Solo con `num_operacion`, y sin `ordenar` ni `pagar`. Teclea el número en «Pagar», lee el aviso de SICAL si sale y **cancela sin validar**. Devuelve `pago.comprobacion = {acepta, aviso_sical, avisos_cerrados}` |
 
 Todo lo que no cuadra se rechaza **antes de abrir SICAL**: la tarea vuelve
 `FAILED` con el motivo en `error` y sin haber tocado nada.
