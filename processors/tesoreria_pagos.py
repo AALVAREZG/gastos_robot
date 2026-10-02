@@ -321,17 +321,139 @@ def _valor_de(elemento) -> Optional[str]:
     return valor or None
 
 
+# Lo que hay en un aviso y no es el mensaje: sus botones y la barra de titulo,
+# cuyo boton de cerrar se llama «Cerrar».
+_NO_ES_MENSAJE = ('ButtonControl', 'TitleBarControl', 'MenuBarControl', 'MenuItemControl')
+
+
 def _texto_de(modal) -> Optional[str]:
-    """Los textos de un modal que no son botones ni su propio titulo."""
+    """
+    El mensaje de un aviso de SICAL.
+
+    El texto de un aviso de Delphi es una etiqueta pintada sin ventana propia:
+    UI Automation no la ve. Primera prueba con una operacion ya pagada
+    (02/10/2026): dos avisos, y de ellos solo se leyo «Cerrar» -el boton de la
+    barra de titulo-. Por eso, si no queda nada legible, se pide el texto a
+    Delphi: Ctrl+C sobre un aviso copia al portapapeles titulo, mensaje y
+    botones.
+    """
     partes = []
     try:
         for hijo in modal.iter_children(max_depth=3):
             nombre = (hijo.name or '').strip()
-            if nombre and hijo.class_name != 'TButton' and nombre != modal.name:
+            if (nombre and nombre != modal.name and hijo.class_name != 'TButton'
+                    and getattr(hijo, 'control_type', '') not in _NO_ES_MENSAJE):
                 partes.append(nombre)
     except Exception:
         pass
-    return ' '.join(partes) or None
+    return ' '.join(partes) or _texto_por_portapapeles(modal)
+
+
+def _texto_por_portapapeles(modal) -> Optional[str]:
+    """Ctrl+C sobre el aviso y lectura del portapapeles, que se deja como estaba."""
+    try:
+        previo = portapapeles_leer()
+        secuencia = ctypes.windll.user32.GetClipboardSequenceNumber()
+        modal.send_keys('{Ctrl}c', wait_time=0.3)
+        if ctypes.windll.user32.GetClipboardSequenceNumber() == secuencia:
+            return None
+        copiado = portapapeles_leer()
+    except Exception:
+        return None
+    finally:
+        try:
+            if 'previo' in locals() and previo is not None:
+                portapapeles_escribir(previo)
+        except Exception:
+            pass
+    return mensaje_de_copia(copiado)
+
+
+def mensaje_de_copia(copiado: Optional[str]) -> Optional[str]:
+    """
+    El mensaje de lo que copia un aviso de Delphi con Ctrl+C::
+
+        ---------------------------
+        Error
+        ---------------------------
+        La operacion ya esta pagada.
+        ---------------------------
+        OK
+        ---------------------------
+    """
+    if not copiado:
+        return None
+    bloques, actual = [], []
+    for linea in copiado.replace('\r\n', '\n').split('\n'):
+        if linea.strip() and set(linea.strip()) == {'-'}:
+            bloques.append(actual)
+            actual = []
+        else:
+            actual.append(linea)
+    bloques.append(actual)
+    bloques = [' '.join(l.strip() for l in b if l.strip()) for b in bloques]
+    bloques = [b for b in bloques if b]
+    if len(bloques) >= 3:
+        return bloques[1]               # titulo, mensaje, botones
+    texto = ' '.join(bloques).strip()
+    return texto or None
+
+
+_CF_UNICODETEXT = 13
+_GMEM_MOVEABLE = 0x0002
+
+
+def _api_portapapeles():
+    from ctypes import wintypes
+    u, k = ctypes.windll.user32, ctypes.windll.kernel32
+    u.OpenClipboard.argtypes = [wintypes.HWND]
+    u.GetClipboardData.restype = wintypes.HANDLE
+    u.GetClipboardData.argtypes = [wintypes.UINT]
+    u.SetClipboardData.restype = wintypes.HANDLE
+    u.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    k.GlobalLock.restype = wintypes.LPVOID
+    k.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    k.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    k.GlobalAlloc.restype = wintypes.HGLOBAL
+    k.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    return u, k
+
+
+def portapapeles_leer() -> Optional[str]:
+    """El texto del portapapeles, o None si no hay texto."""
+    u, k = _api_portapapeles()
+    if not u.OpenClipboard(None):
+        return None
+    try:
+        h = u.GetClipboardData(_CF_UNICODETEXT)
+        if not h:
+            return None
+        p = k.GlobalLock(h)
+        if not p:
+            return None
+        try:
+            return ctypes.wstring_at(p)
+        finally:
+            k.GlobalUnlock(h)
+    finally:
+        u.CloseClipboard()
+
+
+def portapapeles_escribir(texto: str) -> None:
+    u, k = _api_portapapeles()
+    datos = ctypes.create_unicode_buffer(texto)
+    tam = ctypes.sizeof(datos)
+    h = k.GlobalAlloc(_GMEM_MOVEABLE, tam)
+    p = k.GlobalLock(h)
+    ctypes.memmove(p, datos, tam)
+    k.GlobalUnlock(h)
+    if not u.OpenClipboard(None):
+        return
+    try:
+        u.EmptyClipboard()
+        u.SetClipboardData(_CF_UNICODETEXT, h)
+    finally:
+        u.CloseClipboard()
 
 
 def _relanzar_con_error_sical(ventana, estado: dict, exc: Exception,

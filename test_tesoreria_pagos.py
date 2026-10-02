@@ -203,3 +203,28 @@ def test_abrir_ventana_espera_lo_que_tarde_la_base_y_cierra_la_que_quedo(monkeyp
     assert pulsado == ['salir']
     assert esperas[1] == tp.ESPERA_VENTANA_S >= 30
     assert manager.ventana_proceso is nueva
+
+
+def test_el_boton_cerrar_de_la_barra_de_titulo_no_es_el_mensaje(monkeypatch):
+    # Primera prueba con una operacion ya pagada: se leyo «Cerrar | Cerrar».
+    monkeypatch.setattr(tp, '_texto_por_portapapeles', lambda modal: 'Operacion ya pagada')
+    cerrar = _Elemento(name='Cerrar', class_name='')
+    cerrar.control_type = 'ButtonControl'
+    modal = _Elemento(name='Error', class_name='TMessageForm', hijos=[cerrar])
+
+    assert tp._texto_de(modal) == 'Operacion ya pagada'
+
+
+@pytest.mark.parametrize('copiado, mensaje', [
+    ('---------------------------\r\nError\r\n---------------------------\r\n'
+     'La operacion ya esta pagada.\r\n---------------------------\r\nOK   \r\n'
+     '---------------------------\r\n', 'La operacion ya esta pagada.'),
+    ('---------------------------\nInformation\n---------------------------\n'
+     'Linea uno\nlinea dos\n---------------------------\nOK\n---------------------------\n',
+     'Linea uno linea dos'),
+    ('texto suelto', 'texto suelto'),
+    ('', None),
+    (None, None),
+])
+def test_mensaje_de_lo_que_copia_un_aviso_de_delphi(copiado, mensaje):
+    assert tp.mensaje_de_copia(copiado) == mensaje
