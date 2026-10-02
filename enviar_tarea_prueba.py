@@ -1,8 +1,12 @@
 """
 Envia una tarea de prueba a la cola de gastos y espera la respuesta.
 
-Sirve para probar `ordenarypagar` en SICAL sin el productor. Solo hace las
-pruebas que no pagan nada:
+Sirve para probar `ordenarypagar` en SICAL sin el productor. Todos los
+comandos son inocuos salvo `pagar-lista`, que PAGA DE VERDAD:
+
+    python enviar_tarea_prueba.py pagar-lista 20260103 --fecha 30/09/2026 --confirmo-pago
+        Paga la lista. Exige --fecha (sin valor por defecto) y --confirmo-pago,
+        y antes consulta las pendientes: si la lista no esta, no envia nada.
 
     python enviar_tarea_prueba.py listas
         Lee las listas pendientes de pago del desplegable de «Pagar».
@@ -141,6 +145,11 @@ def main():
     p_lista.add_argument('num_lista')
     p_comprobar = sub.add_parser('comprobar', help='teclear una operacion en Pagar y cancelar sin validar')
     p_comprobar.add_argument('num_operacion')
+    p_pagar = sub.add_parser('pagar-lista', help='PAGAR DE VERDAD una lista pendiente')
+    p_pagar.add_argument('num_lista')
+    p_pagar.add_argument('--fecha', required=True, help='fecha de pago DD/MM/YYYY (obligatoria)')
+    p_pagar.add_argument('--confirmo-pago', action='store_true',
+                         help='sin esto no se envia nada: el pago no se puede deshacer')
     for p in (p_lista, p_comprobar):
         p.add_argument('--sin-consulta', action='store_true',
                        help='no mandar antes la consulta de listas (solo si el consumidor ya es el de esta rama)')
@@ -148,6 +157,10 @@ def main():
         p.add_argument('--fecha', default=date.today().strftime('%d/%m/%Y'),
                        help='fecha que se teclea en Tesoreria Pagos, DD/MM/YYYY (por defecto, hoy)')
     args = parser.parse_args()
+
+    if args.prueba == 'pagar-lista' and not args.confirmo_pago:
+        print('pagar-lista paga de verdad y no se puede deshacer: repite con --confirmo-pago.')
+        return 2
 
     if args.prueba == 'lista' and tesoreria_pagos.PAGO_LISTA_DISPONIBLE:
         # Con el paso de seleccionar ya montado, una lista pendiente se pagaria
@@ -165,7 +178,7 @@ def main():
         # Primero la consulta: es inocua, dice que listas hay y delata a un
         # consumidor antiguo antes de mandarle un ordenarypagar. Es tambien una
         # segunda apertura de Tesoreria Pagos; con --sin-consulta se omite.
-        if args.prueba != 'listas' and args.sin_consulta:
+        if args.prueba != 'listas' and getattr(args, 'sin_consulta', False):
             return _siguiente(conexion, canal, cola_respuesta, args, None)
         respuesta = _enviar(conexion, canal, cola_respuesta, 'listas_pendientes_pago',
                             {'fecha': args.fecha})
@@ -186,6 +199,19 @@ def main():
 
 
 def _siguiente(conexion, canal, cola_respuesta, args, pendientes):
+    if args.prueba == 'pagar-lista':
+        if pendientes is None or not any(
+                tesoreria_pagos.numero_de_lista(l) == tesoreria_pagos.numero_de_lista(args.num_lista)
+                for l in pendientes):
+            print(f'\nLa lista {args.num_lista} no esta entre las pendientes ({pendientes}): no se envia nada.')
+            return 1
+        print(f'\nPAGANDO la lista {args.num_lista} con fecha {args.fecha}...')
+        respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',
+                            {'num_lista': args.num_lista, 'pagar': True, 'fecha_pago': args.fecha})
+        if respuesta is None:
+            return 1
+        _mostrar(respuesta)
+        return 0 if respuesta.get('status') == 'COMPLETED' else 1
     if args.prueba == 'comprobar':
         respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',
                             {'num_operacion': args.num_operacion, 'comprobar': True,

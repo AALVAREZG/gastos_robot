@@ -109,21 +109,14 @@ vacía sí quiere decir que no hay ninguna.
 - Pago por operación (ordenar, pagar o ambos): montado sobre los mismos pasos y
   localizadores que el cierre de ADO/PMP. Ordenar sin pagar, y teclear una
   segunda fecha antes de pagar, son pasos nuevos **sin probar en SICAL**.
-- Pago por lista: montado hasta validar la lista. Antes de teclearla se
-  comprueba que está entre las pendientes del desplegable: es lo que impide
-  pagarla dos veces o pagar otra por un número mal tecleado. **Falta el paso
-  de seleccionar todas las operaciones**; mientras tanto
-  `tesoreria_pagos.PAGO_LISTA_DISPONIBLE = False` y el robot abre «Pagar»,
-  comprueba la lista y **cancela antes de teclearla**, sea cual sea el caso:
+- Pago por lista: se marca «Nº Lista», se comprueba que la lista está entre
+  las pendientes del desplegable —sin poder leerlo no se paga: es lo que impide
+  pagarla dos veces o pagar otra por un número mal tecleado—, se teclea, se
+  valida, se pulsa «Todos» (esperando a que se active) y se valida el pago.
+  Si al pulsar «Todos» SICAL avisa —puede avisar de retenciones; no se ha
+  visto aún— el robot para sin validar y deja el aviso abierto.
+  `PAGO_LISTA_DISPONIBLE = False` vuelve al modo que cancela antes de teclear.
 
-  | La lista | Resultado | `error` |
-  |---|---|---|
-  | ya pagada / no existe | `FAILED` | `ListaNoPendiente`: no está entre las pendientes |
-  | pendiente | `FAILED` | `PagoListaNoDisponible`: está pendiente, falta el paso |
-  | desplegable ilegible | `FAILED` | `PagoListaNoDisponible`: no se ha podido comprobar |
-
-  Así se prueba en SICAL el fallo antes que el acierto, sin pagar nada:
-  `python enviar_tarea_prueba.py lista <nº de una lista ya pagada>`.
 - Lectura del desplegable: por mensajes Win32 (`CB_GETCOUNT`/`CB_GETLBTEXT`)
   sobre el handle del control, probada entre procesos contra un COMBOBOX
   nativo ANSI; **sin probar contra el de SICAL**.

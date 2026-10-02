@@ -208,6 +208,9 @@ TESORERIA_PAGOS_PATHS = {
     # El dialogo de «Ordenar»/«Pagar» (Nº Operación / Nº Lista). Mientras esta
     # abierto desplaza las rutas de la ventana: la fecha deja de ser 2|1|1
     'dialogo_seleccion': 'class:"TFTesoSele"',
+    # Pago por lista: marca todas las operaciones de la lista. La ventana de
+    # errores (TFVerError) tiene otro «Todos»; no se pulsa con ella abierta
+    'todos_button': 'class:"TBitBtn" and name:"Todos"',
 }
 
 # =============================================================================

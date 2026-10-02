@@ -147,8 +147,8 @@ def test_lista_ya_pagada_cancela_sin_teclear(monkeypatch):
     assert 'validar_op_button' not in ventana.pulsado()
 
 
-def test_lista_pendiente_sin_el_paso_de_seleccionar_cancela_sin_teclear():
-    assert tp.PAGO_LISTA_DISPONIBLE is False
+def test_lista_pendiente_con_el_pago_por_lista_apagado_cancela_sin_teclear(monkeypatch):
+    monkeypatch.setattr(tp, 'PAGO_LISTA_DISPONIBLE', False)
     ventana = _Ventana(listas=['0057', '58'])
     with pytest.raises(tp.PagoListaNoDisponible, match='57 esta pendiente'):
         tp.pagar_lista(ventana, '57', LOG)
@@ -157,9 +157,10 @@ def test_lista_pendiente_sin_el_paso_de_seleccionar_cancela_sin_teclear():
     assert ventana.pulsado()[-1] == 'cancel_operation_button'
 
 
-def test_desplegable_ilegible_sin_el_paso_de_seleccionar_cancela_sin_teclear():
+def test_desplegable_ilegible_no_se_paga_sin_comprobar_la_lista():
+    assert tp.PAGO_LISTA_DISPONIBLE is True
     ventana = _Ventana(listas=[])   # UI Automation sin elementos: ilegible
-    with pytest.raises(tp.PagoListaNoDisponible, match='no se ha podido comprobar'):
+    with pytest.raises(tp.ListaNoComprobable, match='sin comprobarla'):
         tp.pagar_lista(ventana, '57', LOG)
 
     assert ventana.tecleado() == []
@@ -524,3 +525,62 @@ def test_el_texto_cerrar_se_descarta_aunque_no_diga_que_es_boton(monkeypatch):
     modal = _Modal('Cerrar', None)
     modal.iter_children = lambda max_depth=8: iter([_Hijo('Cerrar', control_type='')])
     assert tp._texto_de(modal) == AVISO_REAL
+
+
+# --- boton «Todos» del pago por lista -----------------------------------------
+
+class _Boton:
+    def __init__(self, pulsado, activo_tras=0):
+        self._pulsado = pulsado
+        self._consultas = 0
+        self._activo_tras = activo_tras
+        me = self
+
+        class _UIA:
+            @property
+            def IsEnabled(self):
+                me._consultas += 1
+                return me._consultas > me._activo_tras
+        self.ui_automation_control = _UIA()
+
+    def click(self, wait_time=None):
+        self._pulsado.append('todos')
+
+
+@pytest.fixture
+def todos(monkeypatch):
+    pulsado = []
+    estado = {'boton': _Boton(pulsado), 'aviso': None, 'error': None}
+    monkeypatch.setattr(tp, 'leer_error_sical', lambda v: estado['error'])
+    monkeypatch.setattr(tp.time, 'sleep', lambda s: None)
+
+    def buscar(v, loc, **k):
+        if loc == tp.TESORERIA_PAGOS_PATHS['todos_button']:
+            return estado['boton']
+        if 'TMessageForm' in loc:
+            return estado['aviso']
+        return None
+    monkeypatch.setattr(tp, 'find_control', buscar)
+    estado['pulsado'] = pulsado
+    return estado
+
+
+def test_todos_espera_a_que_el_boton_se_active(todos):
+    todos['boton'] = _Boton(todos['pulsado'], activo_tras=3)
+    tp.seleccionar_todas_las_operaciones(None)
+    assert todos['pulsado'] == ['todos']
+
+
+def test_todos_no_se_pulsa_con_la_ventana_de_errores_delante(todos):
+    # TFVerError tiene su propio boton «Todos».
+    todos['error'] = 'La lista tiene operaciones con errores'
+    with pytest.raises(tp.ErrorSicalPago, match='antes de seleccionar'):
+        tp.seleccionar_todas_las_operaciones(None)
+    assert todos['pulsado'] == []
+
+
+def test_un_aviso_al_seleccionar_para_sin_validar(todos):
+    todos['aviso'] = _Modal('Las operaciones llevan retenciones', None)
+    with pytest.raises(tp.ErrorSicalPago, match='retenciones'):
+        tp.seleccionar_todas_las_operaciones(None)
+    assert todos['pulsado'] == ['todos']

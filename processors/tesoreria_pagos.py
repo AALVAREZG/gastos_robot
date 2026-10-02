@@ -48,7 +48,7 @@ MODO_LISTA = 'num_lista'
 # teclearla**: recorre el camino real hasta el ultimo punto seguro y nunca paga.
 # Es lo que permite probar en SICAL el fallo -una lista ya pagada- antes que el
 # acierto.
-PAGO_LISTA_DISPONIBLE = False
+PAGO_LISTA_DISPONIBLE = True
 
 # Valores de estado['ordenacion'] y estado['pago']
 PENDIENTE = 'pendiente'          # pedido y no terminado: es lo que falta
@@ -79,6 +79,10 @@ class ListaNoPendiente(PagoCancelado):
 
 class PagoListaNoDisponible(PagoCancelado):
     """La lista se podria pagar, pero falta el paso de seleccionar sus operaciones."""
+
+
+class ListaNoComprobable(PagoCancelado):
+    """No se ha podido leer el desplegable: sin comprobar la lista no se paga."""
 
 
 class OperacionNoPagable(PagoCancelado):
@@ -794,16 +798,48 @@ def consultar_listas_pendientes(ventana, fecha: str, logger: logging.Logger) -> 
     return listas
 
 
+ESPERA_TODOS_S = 10.0
+
+
 def seleccionar_todas_las_operaciones(ventana) -> None:
     """
     Paso propio del pago por lista: en la ventana que sigue a validar la lista
-    hay que marcar todas sus operaciones antes de validar el pago.
+    hay que marcar todas sus operaciones -boton «Todos»- antes de validar el
+    pago.
 
-    PENDIENTE: falta el localizador. Mientras tanto PAGO_LISTA_DISPONIBLE es
-    False y `pagar_lista` cancela antes de teclear la lista, asi que aqui no
-    se llega.
+    Se espera a que el boton este activo: la lista tarda en cargar lo que
+    tarde la base remota, y pulsarlo desactivado no marcaria nada.
+
+    Si tras pulsarlo SICAL saca un aviso -puede avisar de que llevan
+    retenciones; no se ha visto aun- no se toca: se para con su texto, sin
+    validar, y se depura sobre la marcha.
     """
-    raise NotImplementedError('pago por lista: falta el paso de seleccionar todas las operaciones')
+    texto = leer_error_sical(ventana)
+    if texto is not None:
+        # La ventana de errores tiene su propio «Todos»: no se pulsa con ella delante.
+        raise ErrorSicalPago(f'SICAL: {texto} (antes de seleccionar las operaciones)')
+
+    limite = time.monotonic() + ESPERA_TODOS_S
+    todos = find_control(ventana, TESORERIA_PAGOS_PATHS['todos_button'], timeout=ESPERA_TODOS_S)
+    while not _activo(todos) and time.monotonic() < limite:
+        time.sleep(0.3)
+    if not _activo(todos):
+        raise ErrorSicalPago('el boton «Todos» no se ha activado: la lista no ha cargado sus operaciones')
+    todos.click(wait_time=0.8)
+
+    aviso = find_control(ventana, 'class:"TMessageForm"', timeout=ESPERA_AVISO_S, raise_error=False)
+    if aviso:
+        raise ErrorSicalPago(
+            f'SICAL avisa al seleccionar las operaciones: {_texto_de(aviso) or aviso.name} '
+            f'(no se ha validado nada; el aviso sigue abierto)')
+
+
+def _activo(control) -> bool:
+    try:
+        return bool(control.ui_automation_control.IsEnabled)
+    except Exception:
+        # Si no se puede saber, se da por activo, como hasta ahora con cualquier boton.
+        return True
 
 
 def pagar_lista(ventana, num_lista: str, logger: logging.Logger) -> None:
@@ -830,7 +866,11 @@ def pagar_lista(ventana, num_lista: str, logger: logging.Logger) -> None:
             f'(falta seleccionar todas las operaciones); se ha cancelado sin teclear nada')
 
     if pendientes is None:
-        logger.warning(f'No se han podido leer las listas pendientes; se paga la {num_lista} sin comprobarla')
+        # La comprobacion es lo unico que impide pagar dos veces la misma
+        # lista: sin ella no se paga.
+        _cancelar_dialogo(ventana)
+        raise ListaNoComprobable(f'no se han podido leer las listas pendientes; '
+                                 f'no se paga la {num_lista} sin comprobarla')
 
     # El desplegable trae ya un valor («0»): se borra antes de teclear.
     combo.click(wait_time=0.2)
