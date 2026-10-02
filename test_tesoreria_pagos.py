@@ -181,3 +181,25 @@ def test_sin_error_abierto_devuelve_none_y_nunca_lanza():
         def find(self, *a, **k):
             raise RuntimeError('COM roto')
     assert tp.leer_error_sical(Rota()) is None
+
+
+def test_abrir_ventana_espera_lo_que_tarde_la_base_y_cierra_la_que_quedo(monkeypatch):
+    salir = _Elemento(name='Salir')
+    pulsado = []
+    salir.click = lambda wait_time=None: pulsado.append('salir')
+    vieja = _Elemento(encuentra={tp.TESORERIA_PAGOS_PATHS['salir_button']: salir})
+    nueva = _Elemento(name='nueva')
+    esperas = []
+
+    def esperar(patron, timeout=15.0, **k):
+        esperas.append(timeout)
+        return vieja if len(esperas) == 1 else nueva
+    monkeypatch.setattr(tp, 'wait_for_window', esperar)
+    monkeypatch.setattr(tp, 'open_menu_option', lambda ruta, logger: True)
+
+    manager = tp.TesoreriaPagosWindowManager(LOG)
+    assert tp.abrir_ventana(manager, LOG)
+
+    assert pulsado == ['salir']
+    assert esperas[1] == tp.ESPERA_VENTANA_S >= 30
+    assert manager.ventana_proceso is nueva

@@ -109,13 +109,46 @@ def estado_completo(estado: dict) -> bool:
 
 def abrir_ventana(window_manager: TesoreriaPagosWindowManager,
                   logger: logging.Logger) -> bool:
-    """Abre Tesoreria Pagos desde el menu y la deja en `window_manager`."""
+    """
+    Abre Tesoreria Pagos desde el menu y la deja en `window_manager`.
+
+    La espera es larga a proposito. La ventana tarda lo que tarde la base de
+    datos remota: 7,6 s en una prueba y mas de 10 en la anterior, que con los
+    10 s de `find_proceso_window` se dio por fallida mientras SICAL seguia
+    abriendola. La ventana aparecia despues, se quedaba abierta y la tarea
+    siguiente abria otra encima: es lo que se veia como «abrir la ventana de
+    pagos dos veces».
+
+    Por lo mismo, si al empezar ya hay una abierta -de una tarea anterior que
+    fallo- se intenta cerrar antes de abrir la nueva.
+    """
+    _cerrar_si_quedo_abierta(window_manager, logger)
+
     if not open_menu_option(SICAL_MENU_PATHS['tesoreria_pagos'], logger):
         return False
 
-    window_manager.ventana_proceso = window_manager.find_proceso_window()
+    window_manager.ventana_proceso = wait_for_window(window_manager.window_pattern,
+                                                     timeout=ESPERA_VENTANA_S)
     logger.debug(f'Tesoreria window: {window_manager.ventana_proceso}')
     return bool(window_manager.ventana_proceso)
+
+
+ESPERA_VENTANA_S = 45.0
+
+
+def _cerrar_si_quedo_abierta(window_manager: TesoreriaPagosWindowManager,
+                             logger: logging.Logger) -> None:
+    """Sale de una Tesoreria Pagos que haya quedado abierta, con su boton «Salir»."""
+    vieja = wait_for_window(window_manager.window_pattern, timeout=0.5)
+    if not vieja:
+        return
+    logger.warning('Tesoreria Pagos ya estaba abierta (de una tarea anterior); se cierra antes de abrirla')
+    try:
+        salir_btn = vieja.find(TESORERIA_PAGOS_PATHS['salir_button'], timeout=1.0, raise_error=False)
+        if salir_btn:
+            salir_btn.click(wait_time=1.0)
+    except Exception as e:
+        logger.warning(f'No se pudo cerrar la Tesoreria Pagos anterior: {e}')
 
 
 # Los modales de este flujo se buscan con `find_control` y no con

@@ -134,6 +134,8 @@ def main():
     p_listas = sub.add_parser('listas', help='leer las listas pendientes de pago')
     p_lista = sub.add_parser('lista', help='intentar pagar una lista (cancela antes de teclearla)')
     p_lista.add_argument('num_lista')
+    p_lista.add_argument('--sin-consulta', action='store_true',
+                         help='no mandar antes la consulta de listas (solo si el consumidor ya es el de esta rama)')
     for p in (p_listas, p_lista):
         p.add_argument('--fecha', default=date.today().strftime('%d/%m/%Y'),
                        help='fecha que se teclea en Tesoreria Pagos, DD/MM/YYYY (por defecto, hoy)')
@@ -152,8 +154,11 @@ def main():
             return 1
         cola_respuesta = canal.queue_declare(queue='', exclusive=True, auto_delete=True).method.queue
 
-        # Siempre primero la consulta: es inocua, dice que listas hay y delata a
-        # un consumidor antiguo antes de mandarle un ordenarypagar.
+        # Primero la consulta: es inocua, dice que listas hay y delata a un
+        # consumidor antiguo antes de mandarle un ordenarypagar. Es tambien una
+        # segunda apertura de Tesoreria Pagos; con --sin-consulta se omite.
+        if args.prueba == 'lista' and args.sin_consulta:
+            return _intentar_lista(conexion, canal, cola_respuesta, args, None)
         respuesta = _enviar(conexion, canal, cola_respuesta, 'listas_pendientes_pago',
                             {'fecha': args.fecha})
         if respuesta is None:
@@ -167,23 +172,27 @@ def main():
             return 0 if respuesta.get('status') == 'COMPLETED' else 1
 
         pendientes = ((respuesta.get('result') or {}).get('pago') or {}).get('listas_pendientes')
-        if pendientes is not None:
-            if any(tesoreria_pagos.numero_de_lista(l) == tesoreria_pagos.numero_de_lista(args.num_lista)
-                   for l in pendientes):
-                print(f'\nAviso: la lista {args.num_lista} esta PENDIENTE. Con el pago por lista '
-                      f'desactivado el robot cancelara antes de teclearla (PagoListaNoDisponible).')
-            else:
-                print(f'\nLa lista {args.num_lista} no esta entre las pendientes: '
-                      f'se espera ListaNoPendiente.')
-
-        respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',
-                            {'num_lista': args.num_lista, 'pagar': True, 'fecha_pago': args.fecha})
-        if respuesta is None:
-            return 1
-        _mostrar(respuesta)
-        return 0
+        return _intentar_lista(conexion, canal, cola_respuesta, args, pendientes)
     finally:
         conexion.close()
+
+
+def _intentar_lista(conexion, canal, cola_respuesta, args, pendientes):
+    if pendientes is not None:
+        if any(tesoreria_pagos.numero_de_lista(l) == tesoreria_pagos.numero_de_lista(args.num_lista)
+               for l in pendientes):
+            print(f'\nAviso: la lista {args.num_lista} esta PENDIENTE. Con el pago por lista '
+                  f'desactivado el robot cancelara antes de teclearla (PagoListaNoDisponible).')
+        else:
+            print(f'\nLa lista {args.num_lista} no esta entre las pendientes: '
+                  f'se espera ListaNoPendiente.')
+
+    respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',
+                        {'num_lista': args.num_lista, 'pagar': True, 'fecha_pago': args.fecha})
+    if respuesta is None:
+        return 1
+    _mostrar(respuesta)
+    return 0
 
 
 if __name__ == '__main__':
