@@ -76,6 +76,9 @@ class OperationResult:
     # so they don't bloat dataclasses.asdict / OperationEncoder.
     capture_status: Optional[str] = None  # 'CAPTURED' | 'FAILED'
     capture_error: Optional[str] = None
+    # Hasta donde llego la ordenacion y el pago (ver processors/tesoreria_pagos.py,
+    # `nuevo_estado`). None si la operacion no paso por Tesoreria Pagos.
+    pago: Optional[dict] = None
 
 
 class OperationEncoder(json.JSONEncoder):
@@ -103,6 +106,7 @@ class OperationEncoder(json.JSONEncoder):
                 'duplicate_token_expires_at': obj.duplicate_token_expires_at,
                 'capture_status': obj.capture_status,
                 'capture_error': obj.capture_error,
+                'pago': obj.pago,
             }
         return super().default(obj)
 

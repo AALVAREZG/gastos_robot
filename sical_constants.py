@@ -196,6 +196,11 @@ TESORERIA_PAGOS_PATHS = {
     'salir_impresion_button': 'class:"TBitBtn" and path:"1|1|10"',
     'salir_button': 'class:"TBitBtn" and name:"Salir" and path:"2|8"',
     'cancel_operation_button': 'class:"TBitBtn" and path:"1|1|2"',
+    # Solo aparece a principio de año, hasta cerrar el ejercicio anterior
+    'ejercicio_combo': 'class:"TComboBox" and path:"2|1|2"',
+    # Ventana de errores de SICAL: un TMemo con el texto y Imprimir/Todos/Salir
+    'ver_error_form': 'class:"TFVerError"',
+    'ver_error_memo': 'class:"TMemo"',
 }
 
 # =============================================================================

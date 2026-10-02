@@ -978,6 +978,18 @@ class PMP450Processor(SicalOperationProcessor):
         self.logger.info(f'Ordering payment for operation: {num_operacion}')
         self.notify_step('Opening payment window')
 
+        datos_pago = {
+            'num_operacion': num_operacion,
+            'fecha_ordenamiento': operation_data.get('fecha_ordenamiento', operation_data['fecha']),
+            'fecha_pago': operation_data.get('fecha_pago', operation_data.get('fecha_ordenamiento', operation_data['fecha']))
+        }
+
+        # Hasta donde llega, paso a paso: si algo falla a mitad, el productor
+        # sabe si la operacion quedo ordenada y que falta por hacer.
+        result.pago = tesoreria_pagos.nuevo_estado(
+            tesoreria_pagos.MODO_OPERACION, num_operacion,
+            fecha_ordenamiento=datos_pago['fecha_ordenamiento'])
+
         pagos_manager = TesoreriaPagosWindowManager(self.logger)
 
         try:
@@ -985,12 +997,6 @@ class PMP450Processor(SicalOperationProcessor):
                 result.status = OperationStatus.FAILED
                 result.error = 'Failed to open Tesoreria Pagos window'
                 return result
-
-            datos_pago = {
-                'num_operacion': num_operacion,
-                'fecha_ordenamiento': operation_data.get('fecha_ordenamiento', operation_data['fecha']),
-                'fecha_pago': operation_data.get('fecha_pago', operation_data.get('fecha_ordenamiento', operation_data['fecha']))
-            }
 
             self.logger.info(f'Payment data: {datos_pago}')
             result = self._execute_payment_ordering(pagos_manager.ventana_proceso, datos_pago, result)
@@ -1024,7 +1030,7 @@ class PMP450Processor(SicalOperationProcessor):
         self.notify_step('Processing payment order')
 
         try:
-            tesoreria_pagos.ordenar_y_pagar(ventana, datos_pago, self.logger)
+            tesoreria_pagos.ordenar_y_pagar(ventana, result.pago, self.logger)
             self.phase_clock.mark(result, 'payment_ordering', f'Operation ordered and paid: {datos_pago["num_operacion"]}')
 
         except Exception as e:

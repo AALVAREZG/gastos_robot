@@ -265,6 +265,7 @@ class GastoConsumer:
                             document_mode=doc_mode,
                             capture_status=result.capture_status,
                             capture_error=result.capture_error,
+                            pago=result.pago,
                             fases=result.completed_phases,
                             contables=[{k: v for k, v in c.items() if k != 'data'}
                                        for c in (contables or [])])
