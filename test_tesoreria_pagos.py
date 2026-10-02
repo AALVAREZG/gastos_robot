@@ -283,3 +283,20 @@ def test_despejar_sin_nada_encima_no_pulsa_nada():
     ventana, pulsado = _ventana_con_restos()
     assert tp.despejar(ventana, LOG) == []
     assert pulsado == []
+
+
+@pytest.mark.parametrize('procesador', ['ADO220Processor', 'PMP450Processor', 'OrdenarPagarProcessor',
+                                        'ListasPendientesPagoProcessor'])
+def test_toda_tarea_que_ordena_o_paga_abre_tesoreria_por_abrir_ventana(procesador, monkeypatch):
+    # abrir_ventana es la que despeja una Tesoreria Pagos que quedo abierta.
+    import processors
+    llamadas = []
+    monkeypatch.setattr(tp, 'abrir_ventana', lambda manager, logger: llamadas.append(manager) or True)
+    proc = getattr(processors, procesador)(LOG)
+
+    if hasattr(proc, '_setup_tesoreria_window'):
+        assert proc._setup_tesoreria_window(tp.TesoreriaPagosWindowManager(LOG))
+    else:
+        proc.window_manager = proc.create_window_manager()
+        assert proc.setup_operation_window()
+    assert len(llamadas) == 1
