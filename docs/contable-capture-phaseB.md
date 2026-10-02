@@ -1,5 +1,12 @@
 # Gasto contable capture — Phase B′ (handoff)
 
+> **Nota (2026-08-29).** El interruptor que describe este documento,
+> `CONTABLE_CAPTURE_ENABLED`, ha quedado como **reserva**: la decisión la toma
+> ahora el productor y viaja en el mensaje (`parameters.document_mode`). La
+> casilla de la GUI que lo cambiaba en caliente se ha retirado. Ver
+> `sical-robot/docs/document-robot-split-spec.md` §4. Lo demás sigue vigente:
+> el camino de captura y los selectores son los mismos.
+
 Self-contained context for the gasto consumer's contable-document capture.
 Mirrors the arqueo pipeline (`arqueos_robot/docs/`), adapted for gasto's
 two-phase model. Read alongside the arqueo specs:

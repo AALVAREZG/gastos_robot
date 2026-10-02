@@ -16,7 +16,6 @@ from sical_base import (
     SicalWindowManager,
     OperationResult,
     OperationStatus,
-    contable_capture_enabled,
     attach_contable_document,
 )
 from sical_constants import (
@@ -26,7 +25,6 @@ from sical_constants import (
     OPERATION_CODES,
     CONSULTA_FORM_PATHS,
     FILTROS_FORM_PATHS,
-    TESORERIA_PAGOS_PATHS,
     VISUAL_DOCUMENTOS_PATHS,
     COMMON_DIALOG_PATHS,
     DEFAULT_TIMING,
@@ -45,7 +43,9 @@ from sical_utils import (
     find_element_with_fallback,
     handle_error_cleanup,
 )
-from sical_ui_utils import wait_for_window
+from sical_ui_utils import wait_for_window, find_control
+from . import tesoreria_pagos
+from .tesoreria_pagos import TesoreriaPagosWindowManager
 from sical_security import (
     get_confirmation_manager,
     get_rate_limiter,
@@ -67,14 +67,6 @@ class ConsultaWindowManager(SicalWindowManager):
     @property
     def window_pattern(self) -> str:
         return SICAL_WINDOWS['consulta']
-
-
-class TesoreriaPagosWindowManager(SicalWindowManager):
-    """Window manager for Tesoreria Pagos windows."""
-
-    @property
-    def window_pattern(self) -> str:
-        return SICAL_WINDOWS['tesoreria']
 
 
 class ADO220Processor(SicalOperationProcessor):
@@ -276,9 +268,21 @@ class ADO220Processor(SicalOperationProcessor):
             if result.status == OperationStatus.COMPLETED and result.num_operacion:
                 self.logger.info(f'Operation validated - Number: {result.num_operacion}')
 
-                # Print operation document
-                self.notify_step('Printing operation document')
-                result = self._print_operation_document(result)
+                # Documento de Intervencion (ADO/PMP).
+                #
+                # En `deferred` esto no se hace: el robot de operaciones no
+                # toca documentos y ni siquiera abre ConOpera. Es donde esta el
+                # ahorro -~1m10s de los 3m19s de un gasto- y es lo que cambia
+                # el invariante: operacion COMPLETED ya no significa «el
+                # documento existe», sino «el documento esta pendiente». Quien
+                # lo encola es el productor.
+                if self.touches_documents():
+                    self.notify_step('Printing operation document')
+                    result = self._print_operation_document(result)
+                else:
+                    self.logger.info(
+                        'document_mode=deferred: se omite el documento de '
+                        'Intervencion; lo encolara el productor')
 
                 # Order and pay
                 self.notify_step('Ordering payment')
@@ -288,7 +292,7 @@ class ADO220Processor(SicalOperationProcessor):
                 # capture the Ordenamiento (O) contable from ConOpera. The
                 # legacy 'O' print inside _order_and_pay is left untouched; this
                 # pass only runs when capture is enabled (capture-only).
-                if (contable_capture_enabled()
+                if (self.should_capture_contable()
                         and result.status == OperationStatus.COMPLETED
                         and result.num_operacion):
                     self.notify_step('Capturing Ordenamiento document')
@@ -414,10 +418,7 @@ class ADO220Processor(SicalOperationProcessor):
                 consulta_manager.close_window()
                 time.sleep(DEFAULT_TIMING['short_wait'])
 
-            result.completed_phases.append({
-                'phase': 'duplicate_check',
-                'description': f'Similar records checked: {result.similiar_records_encountered} found'
-            })
+            self.phase_clock.mark(result, 'duplicate_check', f'Similar records checked: {result.similiar_records_encountered} found')
 
         except windows.ElementNotFound as e:
             self.logger.error(f'Element not found during duplicate check: {e}')
@@ -560,10 +561,7 @@ class ADO220Processor(SicalOperationProcessor):
             # Fill aplicaciones (line items)
             result = self._fill_aplicaciones(ventana, operation_data['aplicaciones'], result)
 
-            result.completed_phases.append({
-                'phase': 'data_entry',
-                'description': 'Operation data entered into form'
-            })
+            self.phase_clock.mark(result, 'data_entry', 'Operation data entered into form')
 
             if result.status != OperationStatus.FAILED:
                 result.status = OperationStatus.COMPLETED
@@ -762,10 +760,7 @@ class ADO220Processor(SicalOperationProcessor):
             ventana.find(ADO220_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
 
             result.status = OperationStatus.COMPLETED
-            result.completed_phases.append({
-                'phase': 'validation',
-                'description': f'Operation validated: {result.num_operacion}'
-            })
+            self.phase_clock.mark(result, 'validation', f'Operation validated: {result.num_operacion}')
 
         except Exception as e:
             self.logger.error(f'Validation error: {e}')
@@ -838,7 +833,7 @@ class ADO220Processor(SicalOperationProcessor):
             if not ventana_visual:
                 raise windows.ElementNotFound('Visualizador de Documentos did not appear within 15s')
 
-            if contable_capture_enabled():
+            if self.should_capture_contable():
                 # Spec v2 (Phase B′): capture the contable PDF and return it to
                 # sical-robot instead of the in-app print. Never raises;
                 # capture_and_return closes the Visualizador internally.
@@ -864,18 +859,12 @@ class ADO220Processor(SicalOperationProcessor):
             except windows.ActionNotPossible:
                 pass
 
-            result.completed_phases.append({
-                'phase': 'printing',
-                'description': f'Print operation document ID: {num_operacion}'
-            })
+            self.phase_clock.mark(result, 'printing', f'Print operation document ID: {num_operacion}')
 
         except Exception as e:
             self.logger.error(f'Error printing document: {e}')
             # Don't fail the operation for printing errors
-            result.completed_phases.append({
-                'phase': 'printing',
-                'description': f'Print failed: {str(e)}'
-            })
+            self.phase_clock.mark(result, 'printing', f'Print failed: {str(e)}')
 
         return result
 
@@ -902,6 +891,19 @@ class ADO220Processor(SicalOperationProcessor):
         self.logger.info(f'Ordering payment for operation: {num_operacion}')
         self.notify_step('Opening payment window')
 
+        # Prepare payment data
+        datos_pago = {
+            'num_operacion': num_operacion,
+            'fecha_ordenamiento': operation_data.get('fecha_ordenamiento', operation_data['fecha']),
+            'fecha_pago': operation_data.get('fecha_pago', operation_data.get('fecha_ordenamiento', operation_data['fecha']))
+        }
+
+        # Hasta donde llega, paso a paso: si algo falla a mitad, el productor
+        # sabe si la operacion quedo ordenada y que falta por hacer.
+        result.pago = tesoreria_pagos.nuevo_estado(
+            tesoreria_pagos.MODO_OPERACION, num_operacion,
+            fecha_ordenamiento=datos_pago['fecha_ordenamiento'])
+
         pagos_manager = TesoreriaPagosWindowManager(self.logger)
 
         try:
@@ -910,13 +912,6 @@ class ADO220Processor(SicalOperationProcessor):
                 result.status = OperationStatus.FAILED
                 result.error = 'Failed to open Tesoreria Pagos window'
                 return result
-
-            # Prepare payment data
-            datos_pago = {
-                'num_operacion': num_operacion,
-                'fecha_ordenamiento': operation_data.get('fecha_ordenamiento', operation_data['fecha']),
-                'fecha_pago': operation_data.get('fecha_pago', operation_data.get('fecha_ordenamiento', operation_data['fecha']))
-            }
 
             self.logger.info(f'Payment data: {datos_pago}')
 
@@ -934,14 +929,7 @@ class ADO220Processor(SicalOperationProcessor):
 
     def _setup_tesoreria_window(self, window_manager: TesoreriaPagosWindowManager) -> bool:
         """Setup the Tesoreria Pagos window."""
-        menu_path = SICAL_MENU_PATHS['tesoreria_pagos']
-
-        if not open_menu_option(menu_path, self.logger):
-            return False
-
-        window_manager.ventana_proceso = window_manager.find_proceso_window()
-        self.logger.debug(f'Tesoreria window: {window_manager.ventana_proceso}')
-        return bool(window_manager.ventana_proceso)
+        return tesoreria_pagos.abrir_ventana(window_manager, self.logger)
 
     def _execute_payment_ordering(
         self,
@@ -952,57 +940,15 @@ class ADO220Processor(SicalOperationProcessor):
         """
         Execute the payment ordering and payment process.
 
-        Args:
-            ventana: Tesoreria Pagos window
-            datos_pago: Payment data
-            result: Current operation result
-
-        Returns:
-            Updated operation result
+        El flujo vive en `processors/tesoreria_pagos.py`, compartido con el
+        resto de procesadores que ordenan y pagan.
         """
         self.logger.info('Starting payment order process')
         self.notify_step('Processing payment order')
 
         try:
-            # Set order date
-            fecha_element = ventana.find(TESORERIA_PAGOS_PATHS['fecha_orden'])
-            fecha_element.send_keys(datos_pago['fecha_ordenamiento'], interval=0.1, wait_time=0.5, send_enter=True)
-
-            # Handle date change confirmation dialog
-            modal_fecha = ventana.find(COMMON_DIALOG_PATHS['info_ok_alt'], raise_error=False)
-            if modal_fecha:
-                modal_fecha.click(wait_time=0.5)
-
-            # Click "Ordenar" button
-            ventana.find(TESORERIA_PAGOS_PATHS['ordenar_button']).click(wait_time=0.8)
-
-            # Select "Nº Operación" option
-            ventana.find(TESORERIA_PAGOS_PATHS['option_num_operacion']).click(wait_time=0.5)
-
-            # Enter operation number
-            num_op_element = ventana.find(TESORERIA_PAGOS_PATHS['num_operacion_input']).click(wait_time=0.2)
-            num_op_element.send_keys(datos_pago['num_operacion'], interval=0.1, wait_time=0.5, send_enter=True)
-
-            # Check if operation is already ordered
-            modal_error = ventana.find('class:"TMessageForm" and name:"Error"', timeout=1.0, raise_error=False)
-
-            if not modal_error:
-                # Operation not yet ordered - proceed with ordering
-                self._complete_ordering_process(ventana)
-            else:
-                # Operation already ordered - skip ordering
-                self.logger.info('Operation already ordered, skipping to payment')
-                ventana.find(COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
-                ventana.find(COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
-                ventana.find(TESORERIA_PAGOS_PATHS['cancel_operation_button']).click(wait_time=0.8)
-
-            # Proceed with payment
-            self._complete_payment_process(ventana, datos_pago)
-
-            result.completed_phases.append({
-                'phase': 'payment_ordering',
-                'description': f'Operation ordered and paid: {datos_pago["num_operacion"]}'
-            })
+            tesoreria_pagos.ordenar_y_pagar(ventana, result.pago, self.logger)
+            self.phase_clock.mark(result, 'payment_ordering', f'Operation ordered and paid: {datos_pago["num_operacion"]}')
 
         except Exception as e:
             self.logger.error(f'Error in order and pay: {e}')
@@ -1010,52 +956,3 @@ class ADO220Processor(SicalOperationProcessor):
             result.error = f'Error ordering/paying operation: {datos_pago["num_operacion"]} - {str(e)}'
 
         return result
-
-    def _complete_ordering_process(self, ventana) -> None:
-        """Complete the ordering process after entering operation number."""
-        time.sleep(0.1)
-
-        # Validate operation
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=0.1)
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=0.1)
-        ventana.find(COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
-
-        # Select payment mandate printing
-        ventana.find(TESORERIA_PAGOS_PATHS['check_mto_pago']).click(wait_time=0.2)
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_mto_button']).click(wait_time=0.2)
-
-        # Confirm dialogs
-        ventana.find(COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
-        ventana.find(COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
-        ventana.find(COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
-
-        # Print dialog
-        ventana_imprimir = wait_for_window(SICAL_WINDOWS['print_dialog'], timeout=15.0)
-        if not ventana_imprimir:
-            raise windows.ElementNotFound('Print dialog did not appear within 15s')
-        ventana_imprimir.find(COMMON_DIALOG_PATHS['print_accept']).click(wait_time=1.0)
-
-        # Final confirmation
-        ventana.find(COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=0.5)
-
-    def _complete_payment_process(self, ventana, datos_pago: Dict[str, Any]) -> None:
-        """Complete the payment process after ordering."""
-        # Click "Pagar" button
-        ventana.find(TESORERIA_PAGOS_PATHS['pagar_button']).click(wait_time=0.4)
-
-        # Select operation number option again
-        ventana.find(TESORERIA_PAGOS_PATHS['option_num_operacion']).click(wait_time=0.5)
-
-        # Enter operation number
-        num_op_element = ventana.find(TESORERIA_PAGOS_PATHS['num_operacion_input']).click(wait_time=0.2)
-        num_op_element.send_keys(datos_pago['num_operacion'], interval=0.1, wait_time=0.5, send_enter=True)
-
-        # Validate payment
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=1.0)
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=1.0)
-        ventana.find(COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
-
-        # Exit
-        ventana.find(TESORERIA_PAGOS_PATHS['salir_impresion_button']).click()
-        time.sleep(0.5)
-        ventana.find(TESORERIA_PAGOS_PATHS['salir_button']).click()

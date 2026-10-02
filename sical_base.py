@@ -16,6 +16,8 @@ from typing import Any, Dict, Optional, Callable
 
 from robocorp import windows
 
+import document_mode
+import run_trace
 from sical_constants import SICAL_WINDOWS, DEFAULT_TIMING
 from sical_config import GUI_EVENTS
 from sical_ui_utils import wait_for_window
@@ -74,6 +76,9 @@ class OperationResult:
     # so they don't bloat dataclasses.asdict / OperationEncoder.
     capture_status: Optional[str] = None  # 'CAPTURED' | 'FAILED'
     capture_error: Optional[str] = None
+    # Hasta donde llego la ordenacion y el pago (ver processors/tesoreria_pagos.py,
+    # `nuevo_estado`). None si la operacion no paso por Tesoreria Pagos.
+    pago: Optional[dict] = None
 
 
 class OperationEncoder(json.JSONEncoder):
@@ -101,6 +106,7 @@ class OperationEncoder(json.JSONEncoder):
                 'duplicate_token_expires_at': obj.duplicate_token_expires_at,
                 'capture_status': obj.capture_status,
                 'capture_error': obj.capture_error,
+                'pago': obj.pago,
             }
         return super().default(obj)
 
@@ -121,6 +127,64 @@ def contable_capture_enabled() -> bool:
         return bool(getattr(config, 'CONTABLE_CAPTURE_ENABLED', False))
     except Exception:
         return False
+
+
+def record_phase(result: 'OperationResult', phase: str, description: str,
+                 started_at: float = None, ended_at: float = None) -> dict:
+    """
+    Anota una fase con marcas de tiempo (spec, Fase 1a).
+
+    Hasta ahora `completed_phases` guardaba `{'phase', 'description'}` sin
+    ninguna marca de tiempo, asi que los tres numeros que la spec deja
+    pendientes en §9 -cuanto de la captura es navegacion de menu, cuanto
+    ahorra de verdad `deferred`, cuanto cuesta un documento en lote- **no
+    existian**. Un instrumento va antes del experimento, no a la vez: por eso
+    esto se despliega solo, por delante del timeout por silencio y del mapa de
+    asientos, que alteran justo los tiempos que se quieren medir.
+
+    De las cinco fases que registra este robot -`duplicate_check`,
+    `data_entry`, `validation`, `printing`, `payment_ordering`- solo `printing`
+    se muda al robot de documentos; las otras cuatro se quedan aqui. No es
+    trabajo que la separacion vaya a repetir.
+    """
+    now = time.time()
+    start = now if started_at is None else started_at
+    end = now if ended_at is None else ended_at
+    entry = {
+        'phase': phase,
+        'description': description,
+        'started_at': datetime.fromtimestamp(start).isoformat(),
+        'ended_at': datetime.fromtimestamp(end).isoformat(),
+        'duration_seconds': round(max(0.0, end - start), 3),
+    }
+    if result.completed_phases is None:
+        result.completed_phases = []
+    result.completed_phases.append(entry)
+    return entry
+
+
+class PhaseClock:
+    """
+    Reloj de fases: cada fase empieza donde acabo la anterior.
+
+    Medir cada fase por separado con su propio `time.time()` de arranque
+    dejaria fuera el tiempo entre fases -menus, esperas de ventana-, que es
+    justo donde esta el gasto que el lote amortiza. Encadenandolas, la suma de
+    las fases es la duracion real de la operacion.
+    """
+
+    def __init__(self):
+        self.last = time.time()
+
+    def reset(self):
+        self.last = time.time()
+
+    def mark(self, result: 'OperationResult', phase: str, description: str) -> dict:
+        now = time.time()
+        entry = record_phase(result, phase, description,
+                             started_at=self.last, ended_at=now)
+        self.last = now
+        return entry
 
 
 def attach_contable_document(result: 'OperationResult', envelope: dict) -> 'OperationResult':
@@ -235,6 +299,36 @@ class SicalOperationProcessor(ABC):
         self.status_callback: Optional[Callable] = None
         self.task_callback: Optional[Callable] = None
         self.window_manager: Optional[SicalWindowManager] = None
+        # Modo de documento pedido por el productor en el mensaje (spec §4).
+        # None = el mensaje no lo trae: se cae a CONTABLE_CAPTURE_ENABLED,
+        # que a partir de aqui es reserva y no interruptor.
+        self.document_mode: Optional[str] = None
+        # Reloj de fases (Fase 1a): cada fase empieza donde acabo la anterior.
+        self.phase_clock = PhaseClock()
+        # Marca del paso anterior, para el rastro en disco.
+        self._paso_anterior_t = None
+        self._paso_anterior = None
+
+    def set_document_mode(self, mode: Optional[str]) -> None:
+        """Fija el modo de documento que viene en el mensaje."""
+        self.document_mode = mode
+
+    def should_capture_contable(self) -> bool:
+        """Capturar el PDF y devolverlo con el resultado."""
+        return document_mode.should_capture(self.document_mode, contable_capture_enabled())
+
+    def should_print_contable(self) -> bool:
+        """Imprimir en SICAL como siempre (camino heredado)."""
+        return document_mode.should_print(self.document_mode, contable_capture_enabled())
+
+    def touches_documents(self) -> bool:
+        """
+        False solo en `deferred`: el robot no abre ConOpera siquiera. De ahi
+        sale el ahorro -~1m10s de los 3m19s de un gasto- y de ahi sale tambien
+        el invariante nuevo: operacion COMPLETED ya no implica «el documento
+        existe», sino «el documento esta pendiente».
+        """
+        return document_mode.touches_documents(self.document_mode, contable_capture_enabled())
 
     def set_callbacks(
         self,
@@ -253,12 +347,27 @@ class SicalOperationProcessor(ABC):
 
     def notify_step(self, step_message: str, **kwargs) -> None:
         """
-        Notify GUI of current processing step.
+        Notify GUI of current processing step, and record it on disk.
+
+        En el rastro cada paso lleva **cuanto tardo el anterior**. Es lo que
+        convierte una lista de pasos en un diagnostico: sin esa cifra se ve
+        que el robot llego hasta cierto punto, con ella se ve donde se quedo
+        parado.
 
         Args:
             step_message: Description of current step
             **kwargs: Additional data to pass to callback
         """
+        ahora = time.time()
+        run_trace.event(
+            'step', step=step_message,
+            paso_anterior=self._paso_anterior,
+            segundos_del_anterior=None if self._paso_anterior_t is None
+            else round(ahora - self._paso_anterior_t, 3),
+            **kwargs)
+        self._paso_anterior_t = ahora
+        self._paso_anterior = step_message
+
         if self.task_callback:
             self.task_callback(GUI_EVENTS['step'], step=step_message, **kwargs)
 
@@ -414,6 +523,9 @@ class SicalOperationProcessor(ABC):
         self.logger.info(f'Starting {self.operation_name} operation')
 
         init_time = datetime.now()
+        self.phase_clock.reset()
+        self._paso_anterior_t = None
+        self._paso_anterior = None
         result = OperationResult(
             status=OperationStatus.PENDING,
             init_time=str(init_time),
@@ -430,7 +542,7 @@ class SicalOperationProcessor(ABC):
             self.notify_step(f'Preparing {self.operation_name} data')
             sical_data = self.create_operation_data(operation_data)
             self.logger.info(f'{self.operation_name} data prepared')
-            result.completed_phases.append({'phase': 'data_creation', 'description': 'Created operation data'})
+            self.phase_clock.mark(result, 'data_creation', 'Created operation data')
 
             # Phase 1.5: Check for duplicates BEFORE opening window
             # This is the key efficiency improvement - we avoid opening the window
@@ -491,7 +603,7 @@ class SicalOperationProcessor(ABC):
             else:
                 result.sical_is_open = True
                 result.status = OperationStatus.IN_PROGRESS
-                result.completed_phases.append({'phase': 'window_setup', 'description': 'Opened SICAL window'})
+                self.phase_clock.mark(result, 'window_setup', 'Opened SICAL window')
 
             # Phase 3: Process the operation form
             self.notify_step(f'Processing {self.operation_name} form')
@@ -500,6 +612,9 @@ class SicalOperationProcessor(ABC):
             self.logger.info(f'Operation processing complete - Status: {result.status.value}')
 
         except Exception as e:
+            run_trace.exception('operation_error', e,
+                                operacion=self.operation_type,
+                                num_operacion=result.num_operacion)
             self.logger.error(f'Error in {self.operation_name} operation: {e}')
             result.status = OperationStatus.FAILED
             result.error = str(e)

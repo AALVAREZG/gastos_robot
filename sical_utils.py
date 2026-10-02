@@ -17,8 +17,31 @@ from sical_constants import (
     COMMON_DIALOG_PATHS,
 )
 from sical_ui_utils import wait_for_window as _wait_for_window_shared
+import run_trace
 
 logger = logging.getLogger(__name__)
+
+TREE_ITEM_LOCATOR = 'control:"TreeItemControl" and name:"{}"'
+
+
+def _find_tree_item(app: Any, name: str, parent: Optional[Any] = None,
+                    timeout: Optional[float] = DEFAULT_TIMING['short_wait']) -> Any:
+    """
+    Un item del arbol del menu.
+
+    Se busca primero entre los hijos del item que se acaba de desplegar -una
+    busqueda de un nivel- y solo si no esta ahi, en todo el arbol como antes.
+    """
+    locator = TREE_ITEM_LOCATOR.format(name)
+    if parent is not None:
+        try:
+            item = parent.find(locator, search_depth=1,
+                               timeout=DEFAULT_TIMING['short_wait'], raise_error=False)
+            if item:
+                return item
+        except Exception:
+            pass
+    return app.find(locator, timeout=timeout)
 
 
 def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logger) -> bool:
@@ -33,16 +56,22 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
         bool: True if menu option was opened successfully, False otherwise
     """
     operation_logger.debug(f'Opening menu path: {menu_path}')
+    t_inicio = time.monotonic()
 
     app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=5.0)
     if not app:
         operation_logger.error('SICAL main menu not found - ensure SICAL is open')
         return False
+    t_menu = time.monotonic()
 
-    # Collapse menu elements before navigation to avoid path conflicts
-    collapse_all_menu_items(operation_logger)
+    # Collapse menu elements before navigation to avoid path conflicts. Se le
+    # pasa la ventana: buscarla otra vez costaba ~1,5 s -la busqueda, traerla
+    # al frente y la espera de 0,5 s que robocorp hace despues-.
+    plegadas = collapse_all_menu_items(operation_logger, app=app)
+    t_plegado = time.monotonic()
 
     # Expand each menu item in the path except the last one
+    parent = None
     for element_name in menu_path[:-1]:
         max_retries = 2
         for attempt in range(max_retries):
@@ -55,12 +84,11 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
                     if not app:
                         operation_logger.error('SICAL main menu lost during navigation')
                         return False
+                    parent = None
 
-                element = app.find(
-                    f'control:"TreeItemControl" and name:"{element_name}"',
-                    timeout=DEFAULT_TIMING['short_wait']
-                )
+                element = _find_tree_item(app, element_name, parent)
                 element.send_keys(keys='{ADD}', wait_time=DEFAULT_TIMING['short_wait'])
+                parent = element
                 break  # Success, exit retry loop
             except AttributeError as e:
                 # Handle the specific __handle error
@@ -90,6 +118,8 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
                 operation_logger.error(f'Failed to expand menu item "{element_name}": {e}')
                 return False
 
+    t_desplegado = time.monotonic()
+
     # Double-click on the last item to open the window
     max_retries = 2
     for attempt in range(max_retries):
@@ -102,10 +132,13 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
                 if not app:
                     operation_logger.error('SICAL main menu lost during final navigation')
                     return False
+                parent = None
 
             last_element_name = menu_path[-1]
-            app.find(f'control:"TreeItemControl" and name:"{last_element_name}"').double_click()
+            _find_tree_item(app, last_element_name, parent, timeout=None).double_click()
             operation_logger.debug(f'Opened menu option: {last_element_name}')
+            _registrar_tiempos_menu(operation_logger, menu_path, plegadas, t_inicio,
+                                    t_menu, t_plegado, t_desplegado, time.monotonic())
             return True
         except AttributeError as e:
             # Handle the specific __handle error
@@ -138,32 +171,97 @@ def open_menu_option(menu_path: Tuple[str, ...], operation_logger: logging.Logge
     return False
 
 
-def collapse_all_menu_items(operation_logger: logging.Logger) -> None:
+def collapse_all_menu_items(operation_logger: logging.Logger, app: Optional[Any] = None) -> Optional[int]:
     """
     Collapse all menu tree elements to ensure clean navigation state.
 
+    Se recorren una vez las raices del arbol y solo se pulsan las que estan
+    desplegadas. Antes se buscaba y se pulsaba cada una de las nueve aunque ya
+    estuviera plegada -lo normal es que haya una o ninguna abierta-: en el
+    robot de documentos se midieron 3,3 s entre plegar, desplegar y abrir
+    (sical_docs.abrir_rapido). Plegar sigue haciendose con la tecla, como
+    siempre; lo nuevo es solo saltarse las que no hace falta.
+
     Args:
         operation_logger: Logger instance for this operation
+        app: la ventana del menu principal, si quien llama ya la tiene
+
+    Returns:
+        Cuantas ramas se han plegado, o None si no se pudo recorrer el arbol.
     """
     try:
-        app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=10.0)
+        if app is None:
+            app = _wait_for_window_shared(SICAL_WINDOWS['main_menu'], timeout=10.0)
         if not app:
             raise windows.ElementNotFound('SICAL main menu not found')
         operation_logger.debug('Collapsing menu tree elements')
 
+        raices = _raices_del_menu(app)
+        plegadas = 0
         for element_name in MENU_TREE_ELEMENTS_TO_COLLAPSE:
             try:
-                element = app.find(
-                    f'control:"TreeItemControl" and name:"{element_name}"',
+                element = raices.get(element_name) or app.find(
+                    TREE_ITEM_LOCATOR.format(element_name),
                     search_depth=2,
                     timeout=DEFAULT_TIMING['short_wait']
                 )
+                if _esta_plegado(element):
+                    continue
                 element.send_keys(keys='{SUBTRACT}', wait_time=DEFAULT_TIMING['short_wait'])
+                plegadas += 1
             except Exception:
                 # Element might not be found or already collapsed, continue
                 pass
+        return plegadas
     except Exception as e:
         operation_logger.warning(f'Error collapsing menu items: {e}')
+        return None
+
+
+def _raices_del_menu(app: Any) -> dict:
+    """Las raices del arbol que hay que plegar, en una sola pasada. {} si no se puede."""
+    raices = {}
+    try:
+        for elemento in app.iter_children(max_depth=2):
+            if (elemento.control_type == 'TreeItemControl'
+                    and elemento.name in MENU_TREE_ELEMENTS_TO_COLLAPSE):
+                raices.setdefault(elemento.name, elemento)
+    except Exception:
+        return {}
+    return raices
+
+
+def _esta_plegado(element: Any) -> bool:
+    """
+    True solo si UI Automation dice que esta plegado o que es una hoja.
+
+    Ante la duda -sin el patron, o si la lectura falla- False: se pliega como
+    siempre, y lo peor que pasa es lo de antes.
+    """
+    try:
+        patron = element.ui_automation_control.GetExpandCollapsePattern()
+        if not patron:
+            return False
+        return patron.ExpandCollapseState in (0, 3)  # Collapsed, LeafNode
+    except Exception:
+        return False
+
+
+def _registrar_tiempos_menu(operation_logger: logging.Logger, menu_path, plegadas,
+                            t_inicio, t_menu, t_plegado, t_desplegado, t_fin) -> None:
+    """Cuanto cuesta cada tramo de la navegacion, para el registro y el rastro."""
+    tramos = {
+        'buscar_menu_s': round(t_menu - t_inicio, 2),
+        'plegar_s': round(t_plegado - t_menu, 2),
+        'desplegar_s': round(t_desplegado - t_plegado, 2),
+        'abrir_s': round(t_fin - t_desplegado, 2),
+    }
+    operation_logger.info(
+        f'Menu {" > ".join(menu_path)}: {round(t_fin - t_inicio, 2)} s '
+        f'(menu {tramos["buscar_menu_s"]}, plegar {tramos["plegar_s"]} [{plegadas} ramas], '
+        f'desplegar {tramos["desplegar_s"]}, abrir {tramos["abrir_s"]})')
+    run_trace.event('menu', ruta=list(menu_path), plegadas=plegadas,
+                    total_s=round(t_fin - t_inicio, 2), **tramos)
 
 
 def handle_error_cleanup(ventana_proceso: Optional[Any] = None) -> None:

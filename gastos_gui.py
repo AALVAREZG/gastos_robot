@@ -9,12 +9,12 @@ import tkinter as tk
 from tkinter import ttk, scrolledtext, filedialog, messagebox, font as tkfont
 import threading
 import logging
-import os
-import sys
 import json
 from datetime import datetime
 from typing import Optional
 
+import gui_log_filter
+import run_trace
 from status_manager import status_manager
 from task_history_db import get_task_history_db
 
@@ -52,9 +52,6 @@ class GastosGUI:
         # Create UI
         self.create_widgets()
 
-        # Apply persisted contable-capture setting and sync the toggle
-        self.init_capture_toggle()
-
         # Start update loop
         self.update_display()
 
@@ -62,16 +59,33 @@ class GastosGUI:
         self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
 
     def setup_logging(self):
-        """Setup logging to capture all logs for display."""
-        # Get root logger
-        root_logger = logging.getLogger()
+        """Enganchar la ventana de registro al logger raiz, solo con lo nuestro.
 
-        # Add our custom handler
+        Estaba en DEBUG y sin filtro, asi que la ventana recibia hasta el ultimo
+        mensaje interno de todas las bibliotecas del entorno -solo `fontTools`
+        trae una veintena de loggers- y empujaba fuera lo que el operador
+        estaba mirando. Ahora INFO y lista blanca (ver gui_log_filter).
+
+        La consola y el fichero siguen recibiendolo todo: cuando hay que
+        depurar de verdad, el ruido de terceros es lo que se quiere leer.
+        """
+        root = logging.getLogger()
+        # El nivel del raiz se fija aqui y no se hereda de quien llegara antes.
+        # Sin esto queda en WARNING por defecto -y nuestros INFO no se veian- o
+        # en DEBUG si alguna biblioteca llamo a basicConfig primero, que es de
+        # donde salia la inundacion. Gatean los manejadores, no el raiz.
+        root.setLevel(logging.DEBUG)
+
         gui_handler = LogHandler()
-        gui_handler.setLevel(logging.DEBUG)
-        formatter = logging.Formatter('%(name)s - %(message)s')
-        gui_handler.setFormatter(formatter)
-        root_logger.addHandler(gui_handler)
+        gui_handler.setFormatter(logging.Formatter('%(name)s - %(message)s'))
+        gui_log_filter.install(gui_handler, level=logging.INFO)
+        root.addHandler(gui_handler)
+
+        # La GUI no pasa por sical_logging.setup_logging, asi que el rastro se
+        # instala tambien aqui; init() es idempotente. Despues de enganchar el
+        # manejador, no antes: init anuncia donde escribe, y ese aviso tiene
+        # que llegar a la ventana.
+        run_trace.init('gastos')
 
     def create_widgets(self):
         """Create all GUI widgets."""
@@ -803,28 +817,6 @@ class GastosGUI:
         )
         self.clear_button.grid(row=0, column=2, padx=3)
 
-        # Contable-capture toggle. Flips config.CONTABLE_CAPTURE_ENABLED live
-        # (read per-operation by the processors), so it takes effect on the
-        # next operation without restarting the consumer.
-        self.capture_enabled_var = tk.BooleanVar(value=False)
-        self.capture_check = ttk.Checkbutton(
-            control_frame,
-            text="📄 Capturar contable (ADO/PMP)",
-            variable=self.capture_enabled_var,
-            command=self.on_toggle_capture
-        )
-        self.capture_check.grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(8, 0))
-
-        # Explains current state + the producer requirement.
-        self.capture_status_label = ttk.Label(
-            control_frame,
-            text="",
-            font=("Segoe UI", 8),
-            wraplength=520,
-            justify=tk.LEFT
-        )
-        self.capture_status_label.grid(row=2, column=0, columnspan=3, sticky=tk.W)
-
     def create_log_panel(self, parent):
         """Create the log display panel - compact height for small screens."""
         log_frame = ttk.LabelFrame(parent, text="📝 Activity Log", padding="3")
@@ -914,108 +906,6 @@ class GastosGUI:
         """Clear statistics."""
         status_manager.reset_stats()
         status_manager.add_log("Statistics cleared", "INFO")
-
-    # --- Contable-capture toggle -------------------------------------------
-
-    def gui_settings_path(self):
-        """Path to the GUI's persisted settings file (next to config.py)."""
-        if getattr(sys, 'frozen', False):
-            base = os.path.dirname(sys.executable)
-        else:
-            base = os.path.dirname(os.path.abspath(__file__))
-        return os.path.join(base, 'gui_settings.json')
-
-    def load_gui_settings(self):
-        """Load persisted GUI settings; empty dict on any error."""
-        try:
-            with open(self.gui_settings_path(), 'r', encoding='utf-8') as f:
-                return json.load(f)
-        except Exception:
-            return {}
-
-    def save_gui_settings(self, settings):
-        """Persist GUI settings (best-effort)."""
-        try:
-            with open(self.gui_settings_path(), 'w', encoding='utf-8') as f:
-                json.dump(settings, f, indent=2)
-        except Exception as e:
-            status_manager.add_log(f"Could not save GUI settings: {e}", "WARNING")
-
-    def get_capture_enabled(self):
-        """Current live value of config.CONTABLE_CAPTURE_ENABLED."""
-        try:
-            import config
-            return bool(getattr(config, 'CONTABLE_CAPTURE_ENABLED', False))
-        except Exception:
-            return False
-
-    def set_capture_enabled(self, enabled):
-        """Mutate the live config flag the processors read per-operation."""
-        try:
-            import config
-            config.CONTABLE_CAPTURE_ENABLED = bool(enabled)
-            return True
-        except Exception as e:
-            status_manager.add_log(f"Could not apply capture setting: {e}", "ERROR")
-            return False
-
-    def init_capture_toggle(self):
-        """Apply any persisted choice, then sync the checkbox to the live flag."""
-        settings = self.load_gui_settings()
-        if 'contable_capture_enabled' in settings:
-            self.set_capture_enabled(settings['contable_capture_enabled'])
-        self.capture_enabled_var.set(self.get_capture_enabled())
-        self.update_capture_label()
-
-    def update_capture_label(self):
-        """Reflect the current state and the producer requirement in the UI."""
-        if self.capture_enabled_var.get():
-            self.capture_status_label.config(
-                text=("ON — el productor (sical-robot) debe tener "
-                      "contableAssemblyEnabled: true, o el documento se "
-                      "captura pero nunca se fusiona/archiva."),
-                foreground="green"
-            )
-        else:
-            self.capture_status_label.config(
-                text="OFF — impresión clásica del contable dentro de SICAL.",
-                foreground="gray"
-            )
-
-    def on_toggle_capture(self):
-        """Handle the capture checkbox: apply live, persist, and inform."""
-        enabled = self.capture_enabled_var.get()
-        self.set_capture_enabled(enabled)
-
-        settings = self.load_gui_settings()
-        settings['contable_capture_enabled'] = bool(enabled)
-        self.save_gui_settings(settings)
-
-        self.update_capture_label()
-
-        if enabled:
-            status_manager.add_log(
-                "Contable capture ENABLED (ADO/PMP) — applies to the next "
-                "operation. Producer must also have contableAssemblyEnabled=true.",
-                "INFO"
-            )
-            messagebox.showinfo(
-                "Captura de contable activada",
-                "El consumidor capturará el PDF contable (ADO/PMP) desde el "
-                "Visualizador y lo devolverá a sical-robot en vez de imprimirlo "
-                "en SICAL.\n\n"
-                "IMPORTANTE — también hay que activarlo en el PRODUCTOR:\n"
-                "  sical-robot/src/data/app-settings.json\n"
-                "  \"contableAssemblyEnabled\": true\n\n"
-                "Si el productor está desactivado, el documento se captura pero "
-                "nunca se fusiona ni se archiva en portafirmas.\n\n"
-                "Nota: la ruta de guardado en SICAL (2|2|3) está SIN VERIFICAR; "
-                "valida con una operación de prueba antes de usarlo en volumen."
-            )
-        else:
-            status_manager.add_log(
-                "Contable capture DISABLED — legacy in-app SICAL print.", "INFO"
-            )
 
     def status_callback(self, event: str, **kwargs):
         """

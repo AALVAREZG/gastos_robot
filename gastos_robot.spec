@@ -59,6 +59,10 @@ hiddenimports = [
 
     # Project modules
     'config',
+    'document_mode',
+    'gui_log_filter',
+    'run_trace',
+    'rabbit_heartbeat',
     'gastos_gui',
     'gasto_task_consumer',
     'sical_base',
@@ -72,7 +76,8 @@ hiddenimports = [
     'processors',
     'processors.ado220_processor',
     'processors.pmp450_processor',
-    'processors.ordenar_tasks',
+    'processors.tesoreria_pagos',
+    'processors.ordenar_pagar_processor',
 ]
 
 # Collect additional submodules

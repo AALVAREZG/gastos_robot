@@ -9,6 +9,7 @@ This module provides a consistent logging configuration that:
 """
 
 import logging
+import run_trace
 import sys
 from typing import Optional
 from datetime import datetime
@@ -62,6 +63,10 @@ def setup_logging(
 
     # Configure specific logger levels to reduce noise
     _configure_third_party_loggers()
+
+    # Rastro en disco: el fichero va a DEBUG aunque la consola vaya a INFO.
+    # Es lo unico que queda para mirar cuando una ejecucion real sale rara.
+    run_trace.init('gastos')
 
 
 def _configure_third_party_loggers() -> None:

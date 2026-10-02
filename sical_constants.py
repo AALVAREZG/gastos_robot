@@ -188,6 +188,10 @@ TESORERIA_PAGOS_PATHS = {
     'ordenar_button': 'name:"Ordenar" and path:"2|7"',
     'option_num_operacion': 'name:"Nº Operación" and class:"TGroupButton"',
     'num_operacion_input': 'class:"TEdit" and path:"1|1|4"',
+    # Con «Nº Lista» marcada (la opcion por defecto) ocupa el sitio del campo
+    # de numero de operacion un desplegable con las listas pendientes de pago
+    'option_num_lista': 'name:"Nº Lista" and class:"TGroupButton"',
+    'num_lista_combo': 'class:"TComboBox" and path:"1|1|4"',
     'validar_op_button': 'class:"TBitBtn" and path:"1|1|1"',
     'validar_orden_button': 'class:"TBitBtn" and path:"2|1|3|12" and name:"Validar"',
     'check_mto_pago': 'class:"TCheckBox" and name:"Mandamientos de Pagos"',
@@ -196,6 +200,17 @@ TESORERIA_PAGOS_PATHS = {
     'salir_impresion_button': 'class:"TBitBtn" and path:"1|1|10"',
     'salir_button': 'class:"TBitBtn" and name:"Salir" and path:"2|8"',
     'cancel_operation_button': 'class:"TBitBtn" and path:"1|1|2"',
+    # Solo aparece a principio de año, hasta cerrar el ejercicio anterior
+    'ejercicio_combo': 'class:"TComboBox" and path:"2|1|2"',
+    # Ventana de errores de SICAL: un TMemo con el texto y Imprimir/Todos/Salir
+    'ver_error_form': 'class:"TFVerError"',
+    'ver_error_memo': 'class:"TMemo"',
+    # El dialogo de «Ordenar»/«Pagar» (Nº Operación / Nº Lista). Mientras esta
+    # abierto desplaza las rutas de la ventana: la fecha deja de ser 2|1|1
+    'dialogo_seleccion': 'class:"TFTesoSele"',
+    # Pago por lista: marca todas las operaciones de la lista. La ventana de
+    # errores (TFVerError) tiene otro «Todos»; no se pulsa con ella abierta
+    'todos_button': 'class:"TBitBtn" and name:"Todos"',
 }
 
 # =============================================================================
