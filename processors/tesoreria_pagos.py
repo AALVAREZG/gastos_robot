@@ -81,6 +81,19 @@ class PagoListaNoDisponible(PagoCancelado):
     """La lista se podria pagar, pero falta el paso de seleccionar sus operaciones."""
 
 
+class OperacionNoPagable(PagoCancelado):
+    """
+    SICAL no deja seleccionar la operacion para pagarla. Se lanza tras cerrar
+    sus avisos y cancelar, sin haber validado nada.
+    """
+
+
+# Lo que dice SICAL al teclear en «Pagar» una operacion ya pagada (02/10/2026,
+# 326100219, comprobado a mano). Es un «no se puede pagar», no un «ya esta
+# pagada»: con una operacion sin ordenar es de esperar el mismo aviso.
+AVISO_NO_SELECCIONABLE = 'no seleccionable para la etapa de tesorer'
+
+
 def nuevo_estado(modo: str, numero: str, fecha_ordenamiento: Optional[str] = None,
                  fecha_pago: Optional[str] = None, ordenar: bool = True,
                  pagar: bool = True) -> dict:
@@ -254,6 +267,14 @@ def pagar_operacion(ventana, num_operacion: str) -> None:
     num_op_element = ventana.find(TESORERIA_PAGOS_PATHS['num_operacion_input']).click(wait_time=0.2)
     num_op_element.send_keys(num_operacion, interval=0.1, wait_time=0.5, send_enter=True)
 
+    # Si SICAL no la deja pagar lo dice aqui, con avisos («no seleccionable
+    # para la etapa de tesoreria» si ya esta pagada). Antes se seguia pulsando
+    # Validar con el aviso delante, y el fallo acababa en un localizador.
+    aviso, _ = _leer_y_cerrar_avisos(ventana, ESPERA_AVISO_PAGO_S)
+    if aviso:
+        _cancelar_dialogo(ventana)
+        raise OperacionNoPagable(f'SICAL no deja pagar la operacion {num_operacion}: {aviso}')
+
     # Validate payment
     ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=1.0)
     ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=1.0)
@@ -324,6 +345,7 @@ def _valor_de(elemento) -> Optional[str]:
 # Lo que hay en un aviso y no es el mensaje: sus botones y la barra de titulo,
 # cuyo boton de cerrar se llama «Cerrar».
 _NO_ES_MENSAJE = ('ButtonControl', 'TitleBarControl', 'MenuBarControl', 'MenuItemControl')
+_BOTONES_DE_VENTANA = ('Cerrar', 'Close', 'Minimizar', 'Maximizar', 'Restaurar', 'Sistema', 'System')
 
 
 def _texto_de(modal) -> Optional[str]:
@@ -342,6 +364,7 @@ def _texto_de(modal) -> Optional[str]:
         for hijo in modal.iter_children(max_depth=3):
             nombre = (hijo.name or '').strip()
             if (nombre and nombre != modal.name and hijo.class_name != 'TButton'
+                    and nombre not in _BOTONES_DE_VENTANA
                     and getattr(hijo, 'control_type', '') not in _NO_ES_MENSAJE):
                 partes.append(nombre)
     except Exception:
@@ -502,6 +525,14 @@ def ordenar_y_pagar(ventana, estado: dict, logger: logging.Logger,
 
         salir(ventana, tras_pago=estado['pago'] == HECHO)
 
+    except PagoCancelado as e:
+        # El dialogo ya esta cancelado: se puede salir limpio.
+        estado['error_sical'] = str(e)
+        try:
+            salir(ventana, tras_pago=False)
+        except Exception as salida:
+            logger.warning(f'No se pudo salir de Tesoreria Pagos: {salida}')
+        raise
     except Exception as e:
         _relanzar_con_error_sical(ventana, estado, e, logger)
 
@@ -517,6 +548,37 @@ def ordenar_y_pagar(ventana, estado: dict, logger: logging.Logger,
 # que SICAL da en ese caso, que es lo que hace falta para tratarlo bien.
 
 ESPERA_AVISO_S = 2.0
+# En el pago real la espera se paga en cada operacion, tambien en las buenas.
+ESPERA_AVISO_PAGO_S = 1.5
+
+
+def _leer_y_cerrar_avisos(ventana, espera: float):
+    """
+    Lee y cierra con OK los avisos que saque SICAL (hasta tres seguidos).
+
+    Returns:
+        (texto de los avisos unidos por « | », o None si no hubo; cuantos se cerraron)
+
+    Raises:
+        ErrorSicalPago si queda un aviso que no se sabe cerrar: entonces no se
+        pulsa nada mas.
+    """
+    aviso = None
+    cerrados = 0
+    modal = find_control(ventana, 'class:"TMessageForm"', timeout=espera, raise_error=False)
+    while modal and cerrados < 3:
+        texto = _texto_de(modal) or f'«{modal.name}» (texto no legible)'
+        aviso = texto if aviso is None else f'{aviso} | {texto}'
+        ok = modal.find(COMMON_DIALOG_PATHS['ok_button'], timeout=1.0, raise_error=False)
+        if not ok:
+            break
+        ok.click(wait_time=0.8)
+        cerrados += 1
+        modal = find_control(ventana, 'class:"TMessageForm"', timeout=1.0, raise_error=False)
+
+    if modal:
+        raise ErrorSicalPago(f'SICAL: {aviso} (el aviso sigue abierto; cierralo a mano)')
+    return aviso, cerrados
 
 
 def comprobar_pago_operacion(ventana, num_operacion: str, logger: logging.Logger) -> dict:
@@ -533,27 +595,17 @@ def comprobar_pago_operacion(ventana, num_operacion: str, logger: logging.Logger
     # A partir de aqui el dialogo esta abierto: cancelar por posicion es seguro.
     campo.send_keys(num_operacion, interval=0.1, wait_time=0.5, send_enter=True)
 
-    aviso = None
-    cerrados = 0
-    modal = find_control(ventana, 'class:"TMessageForm"', timeout=ESPERA_AVISO_S, raise_error=False)
-    while modal and cerrados < 3:
-        texto = _texto_de(modal) or f'«{modal.name}» (texto no legible)'
-        aviso = texto if aviso is None else f'{aviso} | {texto}'
-        ok = modal.find(COMMON_DIALOG_PATHS['ok_button'], timeout=1.0, raise_error=False)
-        if not ok:
-            break
-        ok.click(wait_time=0.8)
-        cerrados += 1
-        modal = find_control(ventana, 'class:"TMessageForm"', timeout=1.0, raise_error=False)
-
-    if modal:
-        # Queda un aviso que no se sabe cerrar: no se pulsa nada mas.
-        raise ErrorSicalPago(f'SICAL: {aviso} (el aviso sigue abierto; cierralo a mano)')
+    aviso, cerrados = _leer_y_cerrar_avisos(ventana, ESPERA_AVISO_S)
 
     _cancelar_dialogo(ventana)
     logger.info(f'Comprobacion de pago de {num_operacion}: '
                 f'{"SICAL lo acepta" if aviso is None else "aviso: " + aviso}')
-    return {'acepta': aviso is None, 'aviso_sical': aviso, 'avisos_cerrados': cerrados}
+    return {
+        'acepta': aviso is None,
+        'aviso_sical': aviso,
+        'avisos_cerrados': cerrados,
+        'no_seleccionable': bool(aviso and AVISO_NO_SELECCIONABLE in aviso.lower()),
+    }
 
 
 def comprobar_pago_y_salir(ventana, estado: dict, logger: logging.Logger) -> dict:

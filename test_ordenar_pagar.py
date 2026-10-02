@@ -433,7 +433,7 @@ def test_comprobar_sin_aviso_cancela_sin_validar(modales):
     ventana = _ventana_de_pago()
     r = tp.comprobar_pago_operacion(ventana, '326100196', LOG)
 
-    assert r == {'acepta': True, 'aviso_sical': None, 'avisos_cerrados': 0}
+    assert r == {'acepta': True, 'aviso_sical': None, 'avisos_cerrados': 0, 'no_seleccionable': False}
     assert ('teclas', 'num_operacion_input', '326100196') in ventana.tecleado()
     assert ventana.pulsado()[-1] == 'cancel_operation_button'
     assert 'validar_op_button' not in ventana.pulsado()
@@ -473,3 +473,54 @@ def test_execute_comprobar_devuelve_lo_que_dijo_sical(proc, monkeypatch):
     assert result.pago['comprobacion']['aviso_sical'] == 'ya pagada'
     assert result.pago['ordenacion'] == tp.NO_SOLICITADO
     assert result.pago['pago'] == tp.NO_SOLICITADO
+
+
+AVISO_REAL = 'Nº de Operación no seleccionable para la etapa de tesorería'
+
+
+def test_comprobar_reconoce_el_aviso_de_no_seleccionable(modales):
+    # El aviso sale dos veces y hay que pulsar OK en las dos (02/10/2026).
+    ventana = _ventana_de_pago([AVISO_REAL, AVISO_REAL])
+    r = tp.comprobar_pago_operacion(ventana, '326100219', LOG)
+
+    assert r['acepta'] is False
+    assert r['no_seleccionable'] is True
+    assert r['avisos_cerrados'] == 2
+    assert ventana.pulsado().count('ok_aviso') == 2
+
+
+def test_pagar_una_operacion_no_pagable_cierra_los_avisos_y_cancela_sin_validar(modales):
+    ventana = _ventana_de_pago([AVISO_REAL, AVISO_REAL])
+    with pytest.raises(tp.OperacionNoPagable, match='no seleccionable'):
+        tp.pagar_operacion(ventana, '326100219')
+
+    pulsado = ventana.pulsado()
+    assert pulsado.count('ok_aviso') == 2
+    assert pulsado[-1] == 'cancel_operation_button'
+    assert 'validar_op_button' not in pulsado
+    assert 'validar_orden_button' not in pulsado
+
+
+def test_ordenar_y_pagar_sale_limpio_si_no_es_pagable(monkeypatch):
+    salidas = []
+    monkeypatch.setattr(tp, 'establecer_fecha', lambda v, f: None)
+    monkeypatch.setattr(tp, 'salir', lambda v, tras_pago=True: salidas.append(tras_pago))
+
+    def no_pagable(v, num):
+        raise tp.OperacionNoPagable(f'SICAL no deja pagar la operacion {num}: {AVISO_REAL}')
+    monkeypatch.setattr(tp, 'pagar_operacion', no_pagable)
+
+    estado = tp.nuevo_estado(tp.MODO_OPERACION, '326100219', fecha_pago='02102026', ordenar=False)
+    with pytest.raises(tp.OperacionNoPagable):
+        tp.ordenar_y_pagar(None, estado, LOG)
+
+    assert salidas == [False]
+    assert estado['pago'] == tp.PENDIENTE
+    assert 'no seleccionable' in estado['error_sical']
+
+
+def test_el_texto_cerrar_se_descarta_aunque_no_diga_que_es_boton(monkeypatch):
+    monkeypatch.setattr(tp, '_texto_por_portapapeles', lambda modal: AVISO_REAL)
+    modal = _Modal('Cerrar', None)
+    modal.iter_children = lambda max_depth=8: iter([_Hijo('Cerrar', control_type='')])
+    assert tp._texto_de(modal) == AVISO_REAL

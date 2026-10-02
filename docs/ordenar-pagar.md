@@ -34,7 +34,7 @@ Mismo sobre que un ADO/PMP (`operation_data.operation.tipo` / `.detalle`):
 | `pagar` | Por defecto `true` |
 | `fecha_ordenamiento` | `DD/MM/YYYY` o `DDMMYYYY`. Si falta, la de pago |
 | `fecha_pago` | Si falta, la de ordenación. Si las dos difieren, se teclea la de pago antes de pagar |
-| `comprobar` | Solo con `num_operacion`, y sin `ordenar` ni `pagar`. Teclea el número en «Pagar», lee el aviso de SICAL si sale y **cancela sin validar**. Devuelve `pago.comprobacion = {acepta, aviso_sical, avisos_cerrados}` |
+| `comprobar` | Solo con `num_operacion`, y sin `ordenar` ni `pagar`. Teclea el número en «Pagar», lee el aviso de SICAL si sale y **cancela sin validar**. Devuelve `pago.comprobacion = {acepta, aviso_sical, avisos_cerrados, no_seleccionable}` |
 
 Todo lo que no cuadra se rechaza **antes de abrir SICAL**: la tarea vuelve
 `FAILED` con el motivo en `error` y sin haber tocado nada.
@@ -67,6 +67,13 @@ mitad:
 | `hecho` | Hecho en esta ejecución |
 | `ya_estaba` | Solo `ordenacion`: SICAL dio error al teclear el número, que se lee como «ya ordenada» (como hasta ahora) |
 | `no_solicitado` | No se pidió |
+
+Con una operación ya pagada, al teclearla en «Pagar» SICAL saca **dos veces**
+el aviso «Nº de Operación no seleccionable para la etapa de tesorería»
+(comprobado a mano y por el robot el 02/10/2026 con la 326100219). Es un «no se
+puede pagar», no un «ya está pagada»: una sin ordenar dará previsiblemente el
+mismo. El robot cierra los dos avisos, cancela sin validar, sale de la ventana
+y la tarea vuelve `FAILED` con `pago: pendiente` y el aviso en `error_sical`.
 
 `error_sical` es el texto de SICAL cuando el fallo ocurre con su ventana de
 errores (`TFVerError`) o un aviso (`TMessageForm`) abierto; también va en
