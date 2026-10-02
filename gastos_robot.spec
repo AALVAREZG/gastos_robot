@@ -77,7 +77,7 @@ hiddenimports = [
     'processors.ado220_processor',
     'processors.pmp450_processor',
     'processors.tesoreria_pagos',
-    'processors.ordenar_tasks',
+    'processors.ordenar_pagar_processor',
 ]
 
 # Collect additional submodules

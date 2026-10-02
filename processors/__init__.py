@@ -8,5 +8,7 @@ the common base class pattern.
 
 from .ado220_processor import ADO220Processor
 from .pmp450_processor import PMP450Processor
+from .ordenar_pagar_processor import OrdenarPagarProcessor, ListasPendientesPagoProcessor
 
-__all__ = ['ADO220Processor', 'PMP450Processor']
+__all__ = ['ADO220Processor', 'PMP450Processor',
+           'OrdenarPagarProcessor', 'ListasPendientesPagoProcessor']

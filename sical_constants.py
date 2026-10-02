@@ -188,6 +188,10 @@ TESORERIA_PAGOS_PATHS = {
     'ordenar_button': 'name:"Ordenar" and path:"2|7"',
     'option_num_operacion': 'name:"Nº Operación" and class:"TGroupButton"',
     'num_operacion_input': 'class:"TEdit" and path:"1|1|4"',
+    # Con «Nº Lista» marcada (la opcion por defecto) ocupa el sitio del campo
+    # de numero de operacion un desplegable con las listas pendientes de pago
+    'option_num_lista': 'name:"Nº Lista" and class:"TGroupButton"',
+    'num_lista_combo': 'class:"TComboBox" and path:"1|1|4"',
     'validar_op_button': 'class:"TBitBtn" and path:"1|1|1"',
     'validar_orden_button': 'class:"TBitBtn" and path:"2|1|3|12" and name:"Validar"',
     'check_mto_pago': 'class:"TCheckBox" and name:"Mandamientos de Pagos"',

@@ -26,16 +26,20 @@ from sical_logging import setup_logging, get_consumer_logger
 from sical_config import GUI_EVENTS
 
 # Import processors
-from processors import ADO220Processor, PMP450Processor
-
-# Import legacy ordenarypagar (to be refactored later)
-from processors.ordenar_tasks import ordenar_y_pagar_operacion_gasto as legacy_ordenar_pagar
+from processors import (
+    ADO220Processor,
+    PMP450Processor,
+    OrdenarPagarProcessor,
+    ListasPendientesPagoProcessor,
+)
 
 
 # Registry of available operation processors
 OPERATION_PROCESSORS: Dict[str, type] = {
     'ado220': ADO220Processor,
     'pmp450': PMP450Processor,
+    'ordenarypagar': OrdenarPagarProcessor,
+    'listas_pendientes_pago': ListasPendientesPagoProcessor,
 }
 
 
@@ -381,12 +385,22 @@ class GastoConsumer:
         texto_sical_list = operation_data.get('texto_sical', [])
         description = texto_sical_list[0].get('texto_ado', '') if texto_sical_list else None
 
+        # Ordenar/pagar no trae texto ni aplicaciones: se describe por lo que hace
+        if operation_type == 'ordenarypagar':
+            if operation_data.get('num_lista'):
+                description = f'Pagar lista {operation_data["num_lista"]}'
+            else:
+                description = f'Ordenar/pagar operacion {operation_data.get("num_operacion")}'
+        elif operation_type == 'listas_pendientes_pago':
+            description = 'Consultar listas pendientes de pago'
+
         return {
             'task_id': task_id,
             'operation_type': operation_type,
             'operation_number': operation_data.get('num_operacion'),
             'amount': total_amount,
-            'date': operation_data.get('fecha'),
+            'date': (operation_data.get('fecha') or operation_data.get('fecha_pago')
+                     or operation_data.get('fecha_ordenamiento')),
             'cash_register': operation_data.get('caja'),
             'third_party': operation_data.get('tercero'),
             'nature': operation_data.get('naturaleza'),
@@ -427,11 +441,6 @@ class GastoConsumer:
 
             # Execute operation
             return processor.execute(operation_data)
-
-        elif operation_type == 'ordenarypagar':
-            # Use legacy ordenarypagar (to be refactored)
-            self.logger.info('Using legacy ordenarypagar handler')
-            return legacy_ordenar_pagar(operation_data)
 
         else:
             # Unknown operation type
