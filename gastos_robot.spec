@@ -76,6 +76,7 @@ hiddenimports = [
     'processors',
     'processors.ado220_processor',
     'processors.pmp450_processor',
+    'processors.tesoreria_pagos',
     'processors.ordenar_tasks',
 ]
 

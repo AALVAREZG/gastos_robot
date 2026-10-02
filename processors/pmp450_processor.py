@@ -28,7 +28,6 @@ from sical_constants import (
     OPERATION_CODES,
     CONSULTA_FORM_PATHS,
     FILTROS_FORM_PATHS,
-    TESORERIA_PAGOS_PATHS,
     VISUAL_DOCUMENTOS_PATHS,
     COMMON_DIALOG_PATHS,
     DEFAULT_TIMING,
@@ -48,6 +47,8 @@ from sical_utils import (
     handle_error_cleanup,
 )
 from sical_ui_utils import wait_for_window, find_control
+from . import tesoreria_pagos
+from .tesoreria_pagos import TesoreriaPagosWindowManager
 from sical_security import (
     get_confirmation_manager,
     get_rate_limiter,
@@ -977,9 +978,6 @@ class PMP450Processor(SicalOperationProcessor):
         self.logger.info(f'Ordering payment for operation: {num_operacion}')
         self.notify_step('Opening payment window')
 
-        # Import from ADO220 processor to reuse payment logic
-        from .ado220_processor import TesoreriaPagosWindowManager
-
         pagos_manager = TesoreriaPagosWindowManager(self.logger)
 
         try:
@@ -1006,16 +1004,9 @@ class PMP450Processor(SicalOperationProcessor):
 
         return result
 
-    def _setup_tesoreria_window(self, window_manager) -> bool:
+    def _setup_tesoreria_window(self, window_manager: TesoreriaPagosWindowManager) -> bool:
         """Setup the Tesoreria Pagos window."""
-        menu_path = SICAL_MENU_PATHS['tesoreria_pagos']
-
-        if not open_menu_option(menu_path, self.logger):
-            return False
-
-        window_manager.ventana_proceso = window_manager.find_proceso_window()
-        self.logger.debug(f'Tesoreria window: {window_manager.ventana_proceso}')
-        return bool(window_manager.ventana_proceso)
+        return tesoreria_pagos.abrir_ventana(window_manager, self.logger)
 
     def _execute_payment_ordering(
         self,
@@ -1026,37 +1017,14 @@ class PMP450Processor(SicalOperationProcessor):
         """
         Execute the payment ordering and payment process.
 
-        This follows the same logic as ADO220.
+        El flujo vive en `processors/tesoreria_pagos.py`, compartido con el
+        resto de procesadores que ordenan y pagan.
         """
         self.logger.info('Starting payment order process')
         self.notify_step('Processing payment order')
 
         try:
-            fecha_element = ventana.find(TESORERIA_PAGOS_PATHS['fecha_orden'])
-            fecha_element.send_keys(datos_pago['fecha_ordenamiento'], interval=0.1, wait_time=0.5, send_enter=True)
-
-            modal_fecha = find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt'], timeout=2.0, raise_error=False)
-            if modal_fecha:
-                modal_fecha.click(wait_time=0.5)
-
-            ventana.find(TESORERIA_PAGOS_PATHS['ordenar_button']).click(wait_time=0.8)
-            ventana.find(TESORERIA_PAGOS_PATHS['option_num_operacion']).click(wait_time=0.5)
-
-            num_op_element = ventana.find(TESORERIA_PAGOS_PATHS['num_operacion_input']).click(wait_time=0.2)
-            num_op_element.send_keys(datos_pago['num_operacion'], interval=0.1, wait_time=0.5, send_enter=True)
-
-            modal_error = find_control(ventana, 'class:"TMessageForm" and name:"Error"', timeout=1.0, raise_error=False)
-
-            if not modal_error:
-                self._complete_ordering_process(ventana)
-            else:
-                self.logger.info('Operation already ordered, skipping to payment')
-                find_control(ventana, COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
-                find_control(ventana, COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
-                ventana.find(TESORERIA_PAGOS_PATHS['cancel_operation_button']).click(wait_time=0.8)
-
-            self._complete_payment_process(ventana, datos_pago)
-
+            tesoreria_pagos.ordenar_y_pagar(ventana, datos_pago, self.logger)
             self.phase_clock.mark(result, 'payment_ordering', f'Operation ordered and paid: {datos_pago["num_operacion"]}')
 
         except Exception as e:
@@ -1065,41 +1033,3 @@ class PMP450Processor(SicalOperationProcessor):
             result.error = f'Error ordering/paying operation: {datos_pago["num_operacion"]} - {str(e)}'
 
         return result
-
-    def _complete_ordering_process(self, ventana) -> None:
-        """Complete the ordering process after entering operation number."""
-        time.sleep(0.1)
-
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=0.1)
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=0.1)
-        find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
-
-        ventana.find(TESORERIA_PAGOS_PATHS['check_mto_pago']).click(wait_time=0.2)
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_mto_button']).click(wait_time=0.2)
-
-        find_control(ventana, COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
-        find_control(ventana, COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
-        find_control(ventana, COMMON_DIALOG_PATHS['confirm_yes_alt']).click(wait_time=0.2)
-
-        ventana_imprimir = wait_for_window(SICAL_WINDOWS['print_dialog'], timeout=15.0)
-        if not ventana_imprimir:
-            raise windows.ElementNotFound('Print dialog did not appear within 15s')
-        find_control(ventana_imprimir, COMMON_DIALOG_PATHS['print_accept']).click(wait_time=1.0)
-
-        find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=0.5)
-
-    def _complete_payment_process(self, ventana, datos_pago: Dict[str, Any]) -> None:
-        """Complete the payment process after ordering."""
-        ventana.find(TESORERIA_PAGOS_PATHS['pagar_button']).click(wait_time=0.4)
-        ventana.find(TESORERIA_PAGOS_PATHS['option_num_operacion']).click(wait_time=0.5)
-
-        num_op_element = ventana.find(TESORERIA_PAGOS_PATHS['num_operacion_input']).click(wait_time=0.2)
-        num_op_element.send_keys(datos_pago['num_operacion'], interval=0.1, wait_time=0.5, send_enter=True)
-
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=1.0)
-        ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=1.0)
-        find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
-
-        ventana.find(TESORERIA_PAGOS_PATHS['salir_impresion_button']).click()
-        time.sleep(0.5)
-        ventana.find(TESORERIA_PAGOS_PATHS['salir_button']).click()
