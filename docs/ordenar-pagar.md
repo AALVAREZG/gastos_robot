@@ -58,7 +58,8 @@ mitad:
   "fecha_pago": "02102026",
   "ordenacion": "no_solicitado",
   "pago": "hecho",
-  "error_sical": null }
+  "error_sical": null,
+  "motivo": null }
 ```
 
 | `ordenacion` / `pago` | |
@@ -74,6 +75,19 @@ el aviso «Nº de Operación no seleccionable para la etapa de tesorería»
 puede pagar», no un «ya está pagada»: una sin ordenar dará previsiblemente el
 mismo. El robot cierra los dos avisos, cancela sin validar, sale de la ventana
 y la tarea vuelve `FAILED` con `pago: pendiente` y el aviso en `error_sical`.
+
+`motivo` es un código, para no depender del texto, cuando lo pedido no se hizo
+por una razón conocida y el robot salió limpio, sin validar nada:
+
+| `motivo` | Qué pasó |
+|---|---|
+| `lista_no_pendiente` | La lista no figura entre las pendientes: ya pagada, aún sin ordenar o número equivocado. El robot no puede distinguirlo |
+| `operacion_no_seleccionable` | SICAL no deja seleccionar la operación para pagarla: ya pagada o aún sin ordenar |
+| `lista_no_comprobable` | No se pudo leer el desplegable de listas; sin comprobarla no se paga |
+| `pago_lista_no_disponible` | Pago por lista desactivado (`PAGO_LISTA_DISPONIBLE = False`) |
+
+Los dos primeros no son un fallo del robot: el productor los enseña como «No
+pendiente», no como «Fallida».
 
 `error_sical` es el texto de SICAL cuando el fallo ocurre con su ventana de
 errores (`TFVerError`) o un aviso (`TMessageForm`) abierto; también va en

@@ -70,26 +70,40 @@ class ErrorSicalPago(Exception):
 
 
 class PagoCancelado(ErrorSicalPago):
-    """Se ha cancelado el dialogo de Pagar sin teclear nada: se puede salir limpio."""
+    """
+    Se ha cancelado el dialogo de Pagar sin teclear nada: se puede salir limpio.
+
+    `motivo` es el codigo que viaja en `estado['motivo']`, para que el
+    productor no tenga que interpretar el texto.
+    """
+    motivo = 'pago_cancelado'
 
 
 class ListaNoPendiente(PagoCancelado):
-    """La lista no esta entre las pendientes de pago (ya pagada, o el numero no es)."""
+    """
+    La lista no esta entre las pendientes de pago: ya pagada, todavia sin
+    ordenar o un numero que no es. El robot no puede distinguirlo.
+    """
+    motivo = 'lista_no_pendiente'
 
 
 class PagoListaNoDisponible(PagoCancelado):
     """La lista se podria pagar, pero falta el paso de seleccionar sus operaciones."""
+    motivo = 'pago_lista_no_disponible'
 
 
 class ListaNoComprobable(PagoCancelado):
     """No se ha podido leer el desplegable: sin comprobar la lista no se paga."""
+    motivo = 'lista_no_comprobable'
 
 
 class OperacionNoPagable(PagoCancelado):
     """
-    SICAL no deja seleccionar la operacion para pagarla. Se lanza tras cerrar
-    sus avisos y cancelar, sin haber validado nada.
+    SICAL no deja seleccionar la operacion para pagarla: ya pagada o todavia
+    sin ordenar. Se lanza tras cerrar sus avisos y cancelar, sin haber
+    validado nada.
     """
+    motivo = 'operacion_no_seleccionable'
 
 
 # Lo que dice SICAL al teclear en «Pagar» una operacion ya pagada (02/10/2026,
@@ -116,6 +130,10 @@ def nuevo_estado(modo: str, numero: str, fecha_ordenamiento: Optional[str] = Non
         'ordenacion': PENDIENTE if ordenar else NO_SOLICITADO,
         'pago': PENDIENTE if pagar else NO_SOLICITADO,
         'error_sical': None,
+        # Por que no se hizo lo pedido, cuando se sabe: el `motivo` de la
+        # excepcion PagoCancelado que lo paro. None si se hizo o si el fallo
+        # fue otro.
+        'motivo': None,
     }
 
 
@@ -580,6 +598,7 @@ def ordenar_y_pagar(ventana, estado: dict, logger: logging.Logger,
     except PagoCancelado as e:
         # El dialogo ya esta cancelado: se puede salir limpio.
         estado['error_sical'] = str(e)
+        estado['motivo'] = e.motivo
         try:
             salir(ventana, tras_pago=False)
         except Exception as salida:
@@ -897,6 +916,7 @@ def pagar_lista_y_salir(ventana, estado: dict, logger: logging.Logger,
     except PagoCancelado as e:
         # El dialogo ya esta cancelado: se puede salir limpio.
         estado['error_sical'] = str(e)
+        estado['motivo'] = e.motivo
         try:
             salir(ventana, tras_pago=False)
         except Exception as salida:
