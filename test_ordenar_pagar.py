@@ -251,6 +251,7 @@ def test_lista_no_pendiente_sale_limpio_y_lo_dice(pasos_lista, monkeypatch):
     assert pasos_lista[-1] == ('salir', False)
     assert estado['pago'] == tp.PENDIENTE
     assert 'no esta entre las pendientes' in estado['error_sical']
+    assert estado['motivo'] == 'lista_no_pendiente'
 
 
 # --- desplegable de listas ---------------------------------------------------
@@ -518,6 +519,7 @@ def test_ordenar_y_pagar_sale_limpio_si_no_es_pagable(monkeypatch):
     assert salidas == [False]
     assert estado['pago'] == tp.PENDIENTE
     assert 'no seleccionable' in estado['error_sical']
+    assert estado['motivo'] == 'operacion_no_seleccionable'
 
 
 def test_el_texto_cerrar_se_descarta_aunque_no_diga_que_es_boton(monkeypatch):

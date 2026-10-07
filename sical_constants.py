@@ -211,6 +211,33 @@ TESORERIA_PAGOS_PATHS = {
     # Pago por lista: marca todas las operaciones de la lista. La ventana de
     # errores (TFVerError) tiene otro «Todos»; no se pulsa con ella abierta
     'todos_button': 'class:"TBitBtn" and name:"Todos"',
+
+    # --- Via de impresion: la relacion de una lista (07/10/2026) ---------
+    # Mapeado con sical-inspector sobre la lista 20260111. El panel
+    # «Seleccionar Listados» (TFLisSele) se cuelga como hijo 1 de la ventana
+    # y la corre una posicion (la fecha pasa de 2|1|1 a 3|1|1); el dialogo de
+    # orden, otra mas. Por eso nada de esto lleva path de ventana: se ancla en
+    # el grupo «Operaciones» o en el panel, cuyos hijos no se mueven.
+    # «Imprimir» se busca dentro de su grupo: la ventana de errores TFVerError
+    # tiene otro «Imprimir».
+    'operaciones_group': 'class:"TGroupBox" and name:"Operaciones"',
+    'imprimir_button': 'class:"TBitBtn" and name:"Imprimir"',
+    'panel_listados': 'class:"TFLisSele"',
+    'grupo_listados': 'class:"TGroupBox" and name:"Seleccionar Listados"',
+    'check_relacion_operaciones': 'class:"TCheckBox" and name:"Relación de Operaciones Procesadas"',
+    # Relativos al panel. La opcion «Nº Lista» se busca en el panel: el
+    # dialogo de Pagar (TFTesoSele) tiene otra con el mismo nombre
+    'opcion_lista_listado': 'class:"TGroupButton" and name:"Nº Lista"',
+    'combo_lista_listado': 'class:"TComboBox" and path:"1|3|7"',
+    # Botones sin nombre, en un formulario fijo (no cambian con el documento,
+    # como los del Visualizador): el del check, que genera el listado, y la
+    # puerta, que cierra el panel. `salir_impresion_button` es esta misma
+    # puerta vista desde la ventana, con el panel que SICAL abre tras pagar
+    'aceptar_listado_button': 'class:"TBitBtn" and path:"1|9"',
+    'salir_listado_button': 'class:"TBitBtn" and path:"1|10"',
+    # «Ordenar el listado por ... (1) Nº Operación, (2) Nº Orden o (3) Nº Pago»
+    'orden_listado_form': 'class:"TInputQueryForm"',
+    'orden_listado_input': 'class:"TEdit"',
 }
 
 # =============================================================================

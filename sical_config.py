@@ -63,6 +63,14 @@ OPERATION_TYPE_CONFIG = {
         'can_finalize': False,
         'supports_duplicates_check': False,
     },
+    'relacion_lista': {
+        'name': 'Relación de lista',
+        'description': 'Relación de operaciones de una lista en PDF (no paga nada)',
+        'operation_code': None,
+        'requires_tesoreria': True,
+        'can_finalize': False,
+        'supports_duplicates_check': False,
+    },
 }
 
 # =============================================================================

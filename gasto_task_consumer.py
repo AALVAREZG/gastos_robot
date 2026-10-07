@@ -31,6 +31,7 @@ from processors import (
     PMP450Processor,
     OrdenarPagarProcessor,
     ListasPendientesPagoProcessor,
+    RelacionListaProcessor,
 )
 
 
@@ -40,6 +41,7 @@ OPERATION_PROCESSORS: Dict[str, type] = {
     'pmp450': PMP450Processor,
     'ordenarypagar': OrdenarPagarProcessor,
     'listas_pendientes_pago': ListasPendientesPagoProcessor,
+    'relacion_lista': RelacionListaProcessor,
 }
 
 
@@ -393,6 +395,8 @@ class GastoConsumer:
                 description = f'Ordenar/pagar operacion {operation_data.get("num_operacion")}'
         elif operation_type == 'listas_pendientes_pago':
             description = 'Consultar listas pendientes de pago'
+        elif operation_type == 'relacion_lista':
+            description = f'Relacion de la lista {operation_data.get("num_lista")}'
 
         return {
             'task_id': task_id,

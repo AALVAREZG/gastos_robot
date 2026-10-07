@@ -85,18 +85,7 @@ def capture_and_return(ventana_visual, num_operacion, phase, cfg):
     ("ADO" or "PMP" this round). On any failure, capture_status="FAILED",
     data=None, capture_error set.
     """
-    envelope = {
-        'phase': phase,
-        'filename': f'{num_operacion}.pdf' if num_operacion else f'{phase}.pdf',
-        'mime_type': 'application/pdf',
-        'page_count': None,
-        'size_bytes': None,
-        'sha256': None,
-        'transport': 'inline_base64',
-        'data': None,
-        'capture_status': 'FAILED',
-        'capture_error': None,
-    }
+    envelope = sobre_vacio(phase, f'{num_operacion}.pdf' if num_operacion else f'{phase}.pdf')
 
     try:
         pdf_path = capture_visualizador_pdf(
@@ -110,6 +99,32 @@ def capture_and_return(ventana_visual, num_operacion, phase, cfg):
         logger.warning('CONTABLE %s: %s', phase, envelope['capture_error'])
         return envelope
 
+    return completar_sobre(envelope, pdf_path, num_operacion, cfg)
+
+
+def sobre_vacio(phase, filename):
+    """El sobre de un documento todavia sin capturar: FAILED hasta que se rellene."""
+    return {
+        'phase': phase,
+        'filename': filename,
+        'mime_type': 'application/pdf',
+        'page_count': None,
+        'size_bytes': None,
+        'sha256': None,
+        'transport': 'inline_base64',
+        'data': None,
+        'capture_status': 'FAILED',
+        'capture_error': None,
+    }
+
+
+def completar_sobre(envelope, pdf_path, numero, cfg, que='operacion'):
+    """
+    Rellena `envelope` con el PDF ya guardado en `pdf_path` y lo da por
+    CAPTURED, salvo que sea demasiado grande o no nombre `numero` (el de la
+    operacion, o el de la lista con `que='lista'`). Nunca lanza.
+    """
+    phase = envelope['phase']
     try:
         with open(pdf_path, 'rb') as fh:
             data = fh.read()
@@ -130,18 +145,18 @@ def capture_and_return(ventana_visual, num_operacion, phase, cfg):
         # Ultima puerta antes de dar la captura por buena: que el
         # documento hable de la operacion que se pidio. Ver
         # `nombra_operacion`.
-        coincide = nombra_operacion(pdf_path, num_operacion)
+        coincide = nombra_operacion(pdf_path, numero)
         if coincide is False:
             envelope['capture_error'] = (
-                f'el PDF capturado no nombra la operacion {num_operacion}: '
-                f'es el documento de otra operacion')
+                f'el PDF capturado no nombra la {que} {numero}: '
+                f'es el documento de otra {que}')
             logger.error('CONTABLE %s: %s', phase, envelope['capture_error'])
             return envelope
         if coincide is None:
             # No bloquea: medido 0 de 398 contables sin capa de texto,
             # y tumbar una captura buena por no poder leerla seria peor
             # que el fallo del que protege.
-            logger.warning('CONTABLE %s: no se pudo comprobar que el PDF nombre la operacion %s; se acepta igual', phase, num_operacion)
+            logger.warning('CONTABLE %s: no se pudo comprobar que el PDF nombre la %s %s; se acepta igual', phase, que, numero)
 
         envelope['data'] = base64.b64encode(data).decode('ascii')
         envelope['capture_status'] = 'CAPTURED'

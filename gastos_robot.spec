@@ -78,6 +78,12 @@ hiddenimports = [
     'processors.pmp450_processor',
     'processors.tesoreria_pagos',
     'processors.ordenar_pagar_processor',
+    'doc_pipeline',
+    'doc_pipeline.capture_and_return',
+    'doc_pipeline.sical_capture',
+    'doc_pipeline.iconos',
+    'doc_pipeline.visualizador',
+    'pypdf',
 ]
 
 # Collect additional submodules
@@ -88,6 +94,9 @@ hiddenimports += collect_submodules('comtypes')
 datas = [
     # Include config.py.example as reference
     ('config.py.example', '.'),
+    # Huellas de los iconos del Visualizador (doc_pipeline/iconos.py). Sin
+    # ellas la relacion de una lista no reconoce ningun boton y no pulsa nada
+    ('iconos/visualizador.json', 'iconos'),
 ]
 
 # Binary files (DLLs, etc.)
