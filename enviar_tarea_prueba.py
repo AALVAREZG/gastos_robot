@@ -7,6 +7,13 @@ comandos son inocuos salvo `pagar-lista`, que PAGA DE VERDAD:
     python enviar_tarea_prueba.py pagar-lista 20260103 --fecha 30/09/2026 --confirmo-pago
         Paga la lista. Exige --fecha (sin valor por defecto) y --confirmo-pago,
         y antes consulta las pendientes: si la lista no esta, no envia nada.
+        Pide `inline_capture`: con la lista pagada, se trae su relacion en PDF.
+
+    python enviar_tarea_prueba.py relacion 20260111 [--guardar relacion.pdf]
+        Saca la relacion de operaciones de la lista en PDF por la via de
+        impresion de Tesoreria Pagos. No paga nada: vale cualquier lista del
+        desplegable, tambien las ya pagadas. Con --guardar escribe el PDF que
+        devuelve el robot.
 
     python enviar_tarea_prueba.py listas
         Lee las listas pendientes de pago del desplegable de «Pagar».
@@ -83,7 +90,7 @@ def _comprobar_cola(canal) -> bool:
     return True
 
 
-def _enviar(conexion, canal, cola_respuesta, tipo, detalle):
+def _enviar(conexion, canal, cola_respuesta, tipo, detalle, document_mode='deferred'):
     task_id = f'prueba_{tipo}_{time.strftime("%Y%m%d_%H%M%S")}'
     correlation_id = f'{task_id}-{uuid.uuid4().hex}'
     cuerpo = {
@@ -91,7 +98,7 @@ def _enviar(conexion, canal, cola_respuesta, tipo, detalle):
         'task_type': 'gasto',
         'schema_version': 3,
         'operation_data': {'operation': {'tipo': tipo, 'detalle': detalle}},
-        'parameters': {'priority': 'normal', 'retry_count': 1, 'document_mode': 'deferred'},
+        'parameters': {'priority': 'normal', 'retry_count': 1, 'document_mode': document_mode},
         'timestamp': int(time.time() * 1000),
     }
     canal.basic_publish(
@@ -129,7 +136,29 @@ def _mostrar(respuesta):
     for fase in resultado.get('completed_phases') or []:
         print(f'   fase:   {fase.get("phase")} ({fase.get("duration_seconds")} s) '
               f'{fase.get("description")}')
+    for doc in respuesta.get('contable_documents') or []:
+        print(f'   documento {doc.get("phase")}: {doc.get("capture_status")} {doc.get("filename")} '
+              f'{doc.get("size_bytes")} B, {doc.get("page_count")} pag.'
+              + (f'  error: {doc["capture_error"]}' if doc.get('capture_error') else ''))
     print(f'   duracion: {resultado.get("duration")}   maquina: {respuesta.get("hostname")}')
+
+
+def _guardar_documento(respuesta, ruta):
+    """Escribe en `ruta` el PDF que vuelve en la respuesta, comprobando su sha256."""
+    import base64
+    import hashlib
+    for doc in respuesta.get('contable_documents') or []:
+        if doc.get('capture_status') == 'CAPTURED' and doc.get('data'):
+            datos = base64.b64decode(doc['data'])
+            if hashlib.sha256(datos).hexdigest() != doc.get('sha256'):
+                print('   El PDF recibido no casa con su sha256: no se guarda.')
+                return False
+            with open(ruta, 'wb') as fh:
+                fh.write(datos)
+            print(f'   PDF guardado en {ruta}')
+            return True
+    print('   La respuesta no trae ningun PDF capturado.')
+    return False
 
 
 def _consumidor_antiguo(respuesta) -> bool:
@@ -150,6 +179,12 @@ def main():
     p_pagar.add_argument('--fecha', required=True, help='fecha de pago DD/MM/YYYY (obligatoria)')
     p_pagar.add_argument('--confirmo-pago', action='store_true',
                          help='sin esto no se envia nada: el pago no se puede deshacer')
+    p_relacion = sub.add_parser('relacion', help='sacar la relacion de una lista en PDF (no paga nada)')
+    p_relacion.add_argument('num_lista')
+    p_relacion.add_argument('--fecha', default=date.today().strftime('%d/%m/%Y'),
+                            help='fecha que se teclea para activar «Imprimir», DD/MM/YYYY (por defecto, hoy)')
+    for p in (p_pagar, p_relacion):
+        p.add_argument('--guardar', help='donde escribir el PDF de la relacion que devuelve el robot')
     for p in (p_lista, p_comprobar):
         p.add_argument('--sin-consulta', action='store_true',
                        help='no mandar antes la consulta de listas (solo si el consumidor ya es el de esta rama)')
@@ -174,6 +209,19 @@ def main():
         if not _comprobar_cola(canal):
             return 1
         cola_respuesta = canal.queue_declare(queue='', exclusive=True, auto_delete=True).method.queue
+
+        # La relacion no necesita la consulta: no paga, y vale con cualquier
+        # lista del desplegable, pendiente o no. Un consumidor antiguo
+        # contesta «Unknown operation type» sin tocar SICAL.
+        if args.prueba == 'relacion':
+            respuesta = _enviar(conexion, canal, cola_respuesta, 'relacion_lista',
+                                {'num_lista': args.num_lista, 'fecha': args.fecha})
+            if respuesta is None:
+                return 1
+            _mostrar(respuesta)
+            if args.guardar:
+                _guardar_documento(respuesta, args.guardar)
+            return 0 if respuesta.get('status') == 'COMPLETED' else 1
 
         # Primero la consulta: es inocua, dice que listas hay y delata a un
         # consumidor antiguo antes de mandarle un ordenarypagar. Es tambien una
@@ -207,10 +255,13 @@ def _siguiente(conexion, canal, cola_respuesta, args, pendientes):
             return 1
         print(f'\nPAGANDO la lista {args.num_lista} con fecha {args.fecha}...')
         respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',
-                            {'num_lista': args.num_lista, 'pagar': True, 'fecha_pago': args.fecha})
+                            {'num_lista': args.num_lista, 'pagar': True, 'fecha_pago': args.fecha},
+                            document_mode='inline_capture')
         if respuesta is None:
             return 1
         _mostrar(respuesta)
+        if args.guardar:
+            _guardar_documento(respuesta, args.guardar)
         return 0 if respuesta.get('status') == 'COMPLETED' else 1
     if args.prueba == 'comprobar':
         respuesta = _enviar(conexion, canal, cola_respuesta, 'ordenarypagar',

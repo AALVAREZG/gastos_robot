@@ -1,0 +1,32 @@
+{
+ "excel": {
+  "huella": "200410526b8d68657cd56ab56da566c56e756931799572e973ed692576890002",
+  "origen": "Visualizador de Documentos de SICAL v2 · lista.json · 2|2|2",
+  "fecha": "2026-10-07T18:53:26"
+ },
+ "pdf": {
+  "huella": "900660097a216599625963596719631962c9649969d961596699792160099006",
+  "origen": "Visualizador de Documentos de SICAL v2 · lista.json · 2|2|3",
+  "fecha": "2026-10-07T18:53:26"
+ },
+ "firma": {
+  "huella": "01180ae412d9539953a959b95a92b4d3b4e4b51c2cf16b245418b0c047003000",
+  "origen": "Visualizador de Documentos de SICAL v2 · lista.json · 2|2|4",
+  "fecha": "2026-10-07T18:53:26"
+ },
+ "imprimir2": {
+  "huella": "0c30304c4cb0b8d9722272a29359b7695c9959c95ba252a26940b64440183000",
+  "origen": "Visualizador de Documentos de SICAL v2 · lista.json · 2|2|5",
+  "fecha": "2026-10-07T18:53:26"
+ },
+ "salir": {
+  "huella": "400cb602b152b412b4d2b652b552b752b752b552b752b35259522d12170c0b40",
+  "origen": "Visualizador de Documentos de SICAL v2 · lista.json · 2|2|6",
+  "fecha": "2026-10-07T18:53:26"
+ },
+ "imprimir": {
+  "huella": "0000040001180e242d042b145ab1b2cd6d6d6ba569b96a396569b432400c3000",
+  "origen": "Visualizador de Documentos de SICAL v2 · lista.json · 2|2|7",
+  "fecha": "2026-10-07T18:53:26"
+ }
+}

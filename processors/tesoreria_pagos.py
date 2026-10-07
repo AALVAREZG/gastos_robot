@@ -37,6 +37,7 @@ from sical_constants import (
 )
 from sical_utils import open_menu_option
 from sical_ui_utils import wait_for_window, find_control
+from doc_pipeline import visualizador
 
 
 MODO_OPERACION = 'num_operacion'
@@ -227,6 +228,13 @@ def despejar(ventana, logger: logging.Logger, intentos: int = 4) -> list:
         if dialogo:
             _cancelar_dialogo(ventana)
             cerrado.append('dialogo de seleccion')
+            continue
+        # El panel de listados: lo deja abierto un pago, o una relacion de
+        # lista que fallo a mitad. Con el delante «Salir» no esta en 2|8.
+        if ventana.find(TESORERIA_PAGOS_PATHS['panel_listados'], search_depth=2,
+                        timeout=0.3, raise_error=False):
+            cerrar_panel_listados(ventana)
+            cerrado.append('panel de listados')
             continue
         break
     if cerrado:
@@ -903,15 +911,34 @@ def pagar_lista(ventana, num_lista: str, logger: logging.Logger) -> None:
 
 
 def pagar_lista_y_salir(ventana, estado: dict, logger: logging.Logger,
-                        avisar: Optional[Callable[[str], None]] = None) -> None:
-    """Paga la lista de `estado` y sale de la ventana, anotando el estado como `ordenar_y_pagar`."""
+                        avisar: Optional[Callable[[str], None]] = None,
+                        tras_pagar: Optional[Callable[[object], None]] = None) -> None:
+    """
+    Paga la lista de `estado` y sale de la ventana, anotando el estado como `ordenar_y_pagar`.
+
+    `tras_pagar(ventana)`, si se da, se llama con la lista ya pagada y la
+    ventana todavia abierta: es donde se saca su relacion. Va despues del pago
+    y nunca lo deshace: lo que falle ahi no cambia `estado` ni impide salir.
+    """
     avisar = avisar or (lambda paso: None)
     try:
         establecer_fecha(ventana, estado['fecha_pago'] or estado['fecha_ordenamiento'])
         avisar('Paying list')
         pagar_lista(ventana, estado['num_lista'], logger)
         estado['pago'] = HECHO
-        salir(ventana, tras_pago=True)
+        if tras_pagar is None:
+            salir(ventana, tras_pago=True)
+        else:
+            # El panel que SICAL deja abierto tras pagar es el de listados, con
+            # lo que el haya marcado: se cierra, y la relacion lo abre de nuevo
+            # por «Imprimir», que es el estado mapeado.
+            cerrar_panel_listados(ventana)
+            try:
+                tras_pagar(ventana)
+            except Exception as e:
+                logger.error(f'Lista {estado["num_lista"]} pagada; su documento ha fallado: {e}')
+            ventana.foreground_window()
+            ventana.find(TESORERIA_PAGOS_PATHS['salir_button']).click()
 
     except PagoCancelado as e:
         # El dialogo ya esta cancelado: se puede salir limpio.
@@ -924,3 +951,236 @@ def pagar_lista_y_salir(ventana, estado: dict, logger: logging.Logger,
         raise
     except Exception as e:
         _relanzar_con_error_sical(ventana, estado, e, logger)
+
+
+# =============================================================================
+# Relacion de la lista: el documento del pago por lista
+# =============================================================================
+#
+# El justificante de un pago por lista es la «Relacion de las Operaciones
+# Procesadas» de esa lista: cada operacion con su orden, su pago, el tercero y
+# el liquido, y el total. Sale por la via de impresion de esta ventana, no por
+# ConOpera -que trabaja por operacion, y una lista no tiene numero de operacion
+# que teclear-, y por eso no lo saca el robot de documentos.
+#
+# Mapeado con sical-inspector el 07/10/2026 sobre la lista 20260111:
+#
+#   1. Con la fecha tecleada se activa «Imprimir» (grupo «Operaciones»). Abre
+#      el panel «Seleccionar Listados» (TFLisSele) SIN ninguna casilla
+#      marcada, con «Nº Lista» elegida y el desplegable de listas en 0.
+#   2. Marcar «Relacion de Operaciones Procesadas» abre «Ordenar el listado
+#      por ...» (TInputQueryForm) con 1 por defecto: (1) Nº Operacion,
+#      (2) Nº Orden o (3) Nº Pago. Se pide el 3.
+#   3. Se elige la lista en el desplegable y se pulsa el boton del check (se
+#      activa al aceptar el orden): se abre el Visualizador.
+#   4. Al salir del Visualizador el panel se cerro con el, o en los 5 s
+#      siguientes: no se sabe cual. Se comprueba y, si sigue, se cierra con su
+#      puerta.
+#
+# El desplegable trae TODAS las listas del ejercicio -104 el 07/10/2026,
+# tambien las ya pagadas-, asi que la relacion se puede sacar cuando se quiera:
+# si falla al pagar, se repite sin volver a pagar (tipo `relacion_lista`).
+#
+# Es un listado: no escribe en SICAL. Lo que si hay que evitar es generar
+# otros listados del mismo panel -cartas, mandamientos, cheques- que van a la
+# impresora. Por eso se comprueba que el panel se abre sin nada marcado y que,
+# antes del check, solo esta marcada la relacion.
+
+RELACION_OPERACIONES = 'Relación de Operaciones Procesadas'
+ORDEN_POR_PAGO = '3'
+ESPERA_PANEL_S = 10.0
+# Lo que tarde SICAL en componer el listado; una lista larga tarda mas.
+ESPERA_VISUALIZADOR_S = 30.0
+
+CB_GETCURSEL = 0x0147
+
+
+class ErrorRelacion(Exception):
+    """No se ha podido sacar la relacion de la lista. Nada ha cambiado en SICAL."""
+
+
+class ListaInexistente(ErrorRelacion):
+    """La lista no esta en el desplegable de listados: numero equivocado o de otro ejercicio."""
+
+
+def cerrar_panel_listados(ventana) -> bool:
+    """Cierra el panel de listados con su puerta, si esta abierto. True si ya no queda."""
+    P = TESORERIA_PAGOS_PATHS
+    panel = ventana.find(P['panel_listados'], search_depth=2, timeout=0.5, raise_error=False)
+    if not panel:
+        return True
+    puerta = panel.find(P['salir_listado_button'], timeout=1.0, raise_error=False)
+    if puerta:
+        puerta.click(wait_time=0.8)
+    return not ventana.find(P['panel_listados'], search_depth=2, timeout=0.5, raise_error=False)
+
+
+def _marcada(casilla) -> bool:
+    return casilla.ui_automation_control.GetTogglePattern().ToggleState == 1
+
+
+def listados_marcados(panel) -> List[str]:
+    """Los listados marcados en el panel, por su nombre."""
+    grupo = panel.find(TESORERIA_PAGOS_PATHS['grupo_listados'], timeout=2.0)
+    return [c.name for c in grupo.iter_children(max_depth=1) if _marcada(c)]
+
+
+def valor_desplegable(combo) -> Optional[str]:
+    """
+    Lo que muestra un TComboBox: CB_GETCURSEL + CB_GETLBTEXT sobre su handle
+    -como `leer_items_desplegable`-, y si no, lo que diga UI Automation.
+    """
+    hwnd = getattr(combo, 'handle', 0) or 0
+    if hwnd:
+        send = ctypes.WINFUNCTYPE(ctypes.c_ssize_t, wintypes.HWND, wintypes.UINT,
+                                  wintypes.WPARAM, wintypes.LPARAM)(
+            ('SendMessageW', ctypes.windll.user32))
+        i = send(hwnd, CB_GETCURSEL, 0, 0)
+        if i < 0:
+            return None
+        largo = send(hwnd, CB_GETLBTEXTLEN, i, 0)
+        if largo >= 0:
+            buf = ctypes.create_unicode_buffer(largo + 1)
+            send(hwnd, CB_GETLBTEXT, i, ctypes.addressof(buf))
+            return buf.value.strip()
+    try:
+        return (combo.ui_automation_control.GetLegacyIAccessiblePattern().Value or '').strip() or None
+    except Exception:
+        return None
+
+
+def abrir_panel_listados(ventana):
+    """«Imprimir» de la ventana -> el panel de listados, recien abierto."""
+    P = TESORERIA_PAGOS_PATHS
+    # Si quedo abierto (de un pago, o de una relacion que fallo) se cierra:
+    # su estado no se conoce, y el recien abierto si.
+    if not cerrar_panel_listados(ventana):
+        raise ErrorRelacion('el panel de listados estaba abierto y no se ha podido cerrar')
+    grupo = ventana.find(P['operaciones_group'], timeout=2.0)
+    imprimir = grupo.find(P['imprimir_button'], timeout=2.0)
+    if not _activo(imprimir):
+        raise ErrorRelacion('«Imprimir» esta desactivado: SICAL lo activa al teclear la fecha')
+    imprimir.click(wait_time=0.8)
+    return find_control(ventana, P['panel_listados'], timeout=ESPERA_PANEL_S)
+
+
+def pedir_orden_por_pago(ventana) -> None:
+    """Contesta «Ordenar el listado por ...» con el 3 (Nº Pago), comprobando que lo tiene."""
+    P = TESORERIA_PAGOS_PATHS
+    modal = find_control(ventana, P['orden_listado_form'], timeout=5.0)
+    campo = modal.find(P['orden_listado_input'], timeout=2.0)
+    try:
+        campo.set_value(ORDEN_POR_PAGO)
+    except Exception:
+        pass
+    if _valor_de(campo) != ORDEN_POR_PAGO:
+        # Trae «1»: se borra y se teclea
+        campo.send_keys('{End}{Back 5}' + ORDEN_POR_PAGO, wait_time=0.3)
+    valor = _valor_de(campo)
+    if valor != ORDEN_POR_PAGO:
+        _cancelar_orden(modal)
+        raise ErrorRelacion(f'el dialogo de orden no acepta el {ORDEN_POR_PAGO} (muestra {valor!r})')
+    modal.find(COMMON_DIALOG_PATHS['ok_button'], timeout=2.0).click(wait_time=0.5)
+
+
+def _cancelar_orden(modal) -> None:
+    cancelar = modal.find('class:"TButton" and name:"Cancel"', timeout=1.0, raise_error=False)
+    if cancelar:
+        cancelar.click(wait_time=0.5)
+
+
+def elegir_lista(panel, num_lista: str) -> None:
+    """
+    Elige la lista en el desplegable del panel y comprueba que es la que
+    muestra. Sin esa comprobacion, un desplegable que no hizo caso sacaria
+    la relacion de la lista que estuviera puesta, y llegaria a la tarea como
+    si fuera la suya.
+    """
+    P = TESORERIA_PAGOS_PATHS
+    opcion = panel.find(P['opcion_lista_listado'], timeout=1.0)
+    if not opcion.ui_automation_control.GetSelectionItemPattern().IsSelected:
+        opcion.click(wait_time=0.3)
+    combo = panel.find(P['combo_lista_listado'], timeout=2.0)
+    elemento = _elemento_de_lista(combo, num_lista)
+    combo.select(elemento)
+    muestra = valor_desplegable(combo)
+    if numero_de_lista(muestra) != numero_de_lista(num_lista):
+        raise ErrorRelacion(f'el desplegable muestra {muestra!r} y no la lista {num_lista}: '
+                            f'no se saca la relacion de otra')
+
+
+def _elemento_de_lista(combo, num_lista: str) -> str:
+    """El elemento del desplegable que es `num_lista`, tal como esta escrito."""
+    items = leer_items_desplegable(combo)
+    if items is None:
+        raise ErrorRelacion('no se puede leer el desplegable de listas del panel')
+    for item in items:
+        if numero_de_lista(item) == numero_de_lista(num_lista):
+            return item
+    raise ListaInexistente(f'la lista {num_lista} no esta en el desplegable de listados '
+                           f'({len(items)} listas)')
+
+
+def relacion_lista_pdf(ventana, num_lista: str, destino: str, logger: logging.Logger,
+                       avisar: Optional[Callable[[str], None]] = None) -> str:
+    """
+    Saca en PDF la relacion de operaciones de una lista, en `destino`.
+
+    Necesita Tesoreria Pagos abierta y con la fecha tecleada (es lo que activa
+    «Imprimir»). Deja la ventana como la encontro: sin Visualizador ni panel,
+    tambien si falla.
+
+    Raises:
+        ErrorRelacion, visualizador.ErrorVisualizador, iconos.IconoNoReconocido,
+        o lo que lance robocorp al no encontrar un control.
+    """
+    avisar = avisar or (lambda paso: None)
+    P = TESORERIA_PAGOS_PATHS
+    try:
+        avisar('Opening list report')
+        panel = abrir_panel_listados(ventana)
+        marcadas = listados_marcados(panel)
+        if marcadas:
+            raise ErrorRelacion(f'el panel de listados se abrio con listados marcados {marcadas}: '
+                                f'no es el estado conocido y no se genera nada')
+        # Antes de marcar nada: que la lista exista (solo lee)
+        _elemento_de_lista(panel.find(P['combo_lista_listado'], timeout=2.0), num_lista)
+
+        grupo = panel.find(P['grupo_listados'], timeout=2.0)
+        grupo.find(P['check_relacion_operaciones'], timeout=2.0).click(wait_time=0.5)
+        pedir_orden_por_pago(ventana)
+
+        marcadas = listados_marcados(panel)
+        if marcadas != [RELACION_OPERACIONES]:
+            raise ErrorRelacion(f'listados marcados {marcadas}; solo puede estarlo '
+                                f'«{RELACION_OPERACIONES}»: los demas van a la impresora')
+        elegir_lista(panel, num_lista)
+
+        aceptar = panel.find(P['aceptar_listado_button'], timeout=2.0)
+        if not _activo(aceptar):
+            raise ErrorRelacion('el boton que genera el listado sigue desactivado')
+        avisar('Generating list report')
+        aceptar.click(wait_time=1.0)
+
+        visor = wait_for_window(SICAL_WINDOWS['visual_documentos'], timeout=ESPERA_VISUALIZADOR_S)
+        if not visor:
+            texto = leer_error_sical(ventana)
+            raise ErrorRelacion(f'el Visualizador no se ha abierto en {ESPERA_VISUALIZADOR_S:.0f} s'
+                                + (f' (SICAL: {texto})' if texto else ''))
+        avisar('Saving list report')
+        ruta = visualizador.guardar_pdf(visor, destino)
+        logger.info(f'Relacion de la lista {num_lista}: {ruta}')
+        return ruta
+    finally:
+        # Lo que quede abierto, se cierra: la ventana sigue y tiene que poder
+        # salir. Nunca lanza, para no tapar el fallo de dentro.
+        try:
+            visualizador.cerrar()
+            modal = ventana.find(P['orden_listado_form'], search_depth=2, timeout=0.3, raise_error=False)
+            if modal:
+                _cancelar_orden(modal)
+            ventana.foreground_window()
+            if not cerrar_panel_listados(ventana):
+                logger.warning('El panel de listados sigue abierto')
+        except Exception as e:
+            logger.warning(f'No se pudo dejar Tesoreria Pagos como estaba: {e}')

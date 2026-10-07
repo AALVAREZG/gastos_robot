@@ -31,24 +31,66 @@ Mensaje (`operation_data.operation`)::
         fecha                       DD/MM/YYYY; por defecto, hoy. Se teclea antes
                                     de pulsar «Pagar», como en un pago
 
+    tipo: 'relacion_lista'          saca la relacion de una lista, sin pagar nada
+    detalle:
+        num_lista
+        fecha                       DD/MM/YYYY; por defecto, hoy. Solo activa
+                                    «Imprimir»: la relacion no depende de ella
+
 El resultado lleva en `result.pago` hasta donde llego cada paso (ver
 `tesoreria_pagos.nuevo_estado`). Con num_operacion, `result.num_operacion` es
 la operacion sobre la que se actuo; con lista va vacio, y el productor no puede
 juzgar el resultado por ese campo.
+
+El documento del pago por lista -la relacion de sus operaciones- va en
+`contable_documents` con la fase `P` cuando el mensaje pide `inline_capture`.
+Lo saca este robot y no el de documentos: ConOpera trabaja por operacion, y
+la relacion sale de Tesoreria Pagos, que ya esta abierta al pagar.
 """
 
+import os
 from datetime import date, datetime
-from typing import Any, Dict, Optional
+from typing import Any, Callable, Dict, Optional
 
 from sical_base import (
     SicalOperationProcessor,
     SicalWindowManager,
     OperationResult,
     OperationStatus,
+    attach_contable_document,
 )
 from sical_utils import transform_date_to_sical_format
+from doc_pipeline import capture_and_return as car
 from . import tesoreria_pagos
 from .tesoreria_pagos import TesoreriaPagosWindowManager
+
+# La relacion de una lista viaja como el documento de la fase de Pago: es el
+# justificante del pago de la tarea, como lo sera la fase P de ConOpera en el
+# pago por operacion. sical-robot la guarda en task_contable_documents
+# (task_id, 'P') sin cambiar el esquema.
+FASE_PAGO = 'P'
+
+
+def capturar_relacion(ventana, num_lista: str, logger,
+                      avisar: Optional[Callable[[str], None]] = None, cfg=None) -> dict:
+    """
+    Saca la relacion de la lista en PDF y devuelve su sobre `contable_document`.
+
+    Nunca lanza: corre con la lista ya pagada, y un documento que falla no
+    puede tumbar un pago hecho. El fallo va en el sobre (FAILED +
+    capture_error), y la relacion se puede volver a pedir con `relacion_lista`.
+    """
+    if cfg is None:
+        import config as cfg
+    sobre = car.sobre_vacio(FASE_PAGO, f'lista_{num_lista}.pdf')
+    destino = os.path.join(cfg.SICAL_PDF_WORKDIR, f'lista_{num_lista}_sical.pdf')
+    try:
+        ruta = tesoreria_pagos.relacion_lista_pdf(ventana, num_lista, destino, logger, avisar)
+    except Exception as e:
+        sobre['capture_error'] = f'relacion de la lista: {e}'
+        logger.warning(f'CONTABLE {FASE_PAGO}: {sobre["capture_error"]}')
+        return sobre
+    return car.completar_sobre(sobre, ruta, num_lista, cfg, que='lista')
 
 
 def _texto(valor: Any) -> Optional[str]:
@@ -195,7 +237,8 @@ class OrdenarPagarProcessor(_TesoreriaPagosProcessor):
                 self.notify_step('Checking payment (no se valida)')
                 tesoreria_pagos.comprobar_pago_y_salir(ventana, estado, self.logger)
             elif modo == tesoreria_pagos.MODO_LISTA:
-                tesoreria_pagos.pagar_lista_y_salir(ventana, estado, self.logger, avisar=self.notify_step)
+                tesoreria_pagos.pagar_lista_y_salir(ventana, estado, self.logger, avisar=self.notify_step,
+                                                    tras_pagar=self._documento_de_lista(result, numero))
             else:
                 tesoreria_pagos.ordenar_y_pagar(ventana, estado, self.logger, avisar=self.notify_step)
 
@@ -210,6 +253,30 @@ class OrdenarPagarProcessor(_TesoreriaPagosProcessor):
             result.error = f'Error ordering/paying {modo} {numero}: {str(e)}'
 
         return result
+
+    def _documento_de_lista(self, result: OperationResult, num_lista: str):
+        """
+        Lo que hay que hacer con la lista ya pagada para traerse su relacion,
+        o None si el mensaje no pide capturar.
+
+        Solo `inline_capture`. En `deferred` nadie vendria despues a por ella
+        -el robot de documentos no la sabe sacar-, asi que es el productor
+        quien publica los pagos por lista en `inline_capture`. En
+        `legacy_print` no se imprime: imprimirla desde el Visualizador no esta
+        mapeado.
+        """
+        if not self.should_capture_contable():
+            self.logger.info(f'document_mode={self.document_mode}: '
+                             f'no se saca la relacion de la lista {num_lista}')
+            return None
+
+        def tras_pagar(ventana):
+            self.notify_step('Capturing list document')
+            attach_contable_document(
+                result, capturar_relacion(ventana, num_lista, self.logger, avisar=self.notify_step))
+            self.phase_clock.mark(result, 'list_document',
+                                  f'Relacion de la lista {num_lista}: {result.capture_status}')
+        return tras_pagar
 
 
 class ListasPendientesPagoProcessor(_TesoreriaPagosProcessor):
@@ -250,4 +317,61 @@ class ListasPendientesPagoProcessor(_TesoreriaPagosProcessor):
         else:
             result.status = OperationStatus.COMPLETED
             self.phase_clock.mark(result, 'payment_lists', f'{len(listas)} listas pendientes')
+        return result
+
+
+class RelacionListaProcessor(_TesoreriaPagosProcessor):
+    """
+    Saca la relacion de operaciones de una lista, sin pagar nada.
+
+    Para repetir el documento de un pago por lista que fallo -la lista ya esta
+    pagada y no se puede volver a pagar- y para probar la via de impresion
+    contra SICAL con cualquier lista, sin pagar. El documento es el objeto de
+    la tarea: se devuelve siempre, sea cual sea el `document_mode`.
+    """
+
+    @property
+    def operation_type(self) -> str:
+        return 'relacion_lista'
+
+    @property
+    def operation_name(self) -> str:
+        return 'Relacion de lista'
+
+    def create_operation_data(self, operation_data: Dict[str, Any]) -> Dict[str, Any]:
+        num_lista = _texto(operation_data.get('num_lista'))
+        if not num_lista or not num_lista.isdigit() or int(num_lista) == 0:
+            raise ValueError(f'relacion_lista: num_lista no es un numero valido: {num_lista!r}')
+        fecha = _fecha(operation_data.get('fecha'), 'fecha') or date.today().strftime('%d%m%Y')
+        return {'num_lista': num_lista, 'fecha': fecha, 'duplicate_policy': None}
+
+    def process_operation_form(
+        self,
+        operation_data: Dict[str, Any],
+        result: OperationResult
+    ) -> OperationResult:
+        ventana = self.window_manager.ventana_proceso
+        num_lista = operation_data['num_lista']
+        try:
+            tesoreria_pagos.establecer_fecha(ventana, operation_data['fecha'])
+        except Exception as e:
+            self.logger.error(f'Error typing the date: {e}')
+            result.status = OperationStatus.FAILED
+            result.error = f'No se ha podido teclear la fecha: {e}'
+            return result
+
+        self.notify_step('Capturing list document')
+        sobre = capturar_relacion(ventana, num_lista, self.logger, avisar=self.notify_step)
+        attach_contable_document(result, sobre)
+        try:
+            tesoreria_pagos.salir(ventana, tras_pago=False)
+        except Exception as e:
+            self.logger.warning(f'No se pudo salir de Tesoreria Pagos: {e}')
+
+        if sobre['capture_status'] == 'CAPTURED':
+            result.status = OperationStatus.COMPLETED
+            self.phase_clock.mark(result, 'list_document', f'Relacion de la lista {num_lista}')
+        else:
+            result.status = OperationStatus.FAILED
+            result.error = sobre['capture_error']
         return result
