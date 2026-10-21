@@ -311,7 +311,8 @@ def _completar_ordenacion(ventana) -> None:
 
     # Validate operation
     ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=0.1)
-    ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=0.1)
+    _esperar_cierre_dialogo(ventana)
+    find_control(ventana, TESORERIA_PAGOS_PATHS['validar_orden_button'], timeout=10.0).click(wait_time=0.1)
     find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
 
     # Select payment mandate printing
@@ -331,6 +332,24 @@ def _completar_ordenacion(ventana) -> None:
 
     # Final confirmation
     find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=0.5)
+
+
+ESPERA_CIERRE_DIALOGO_S = 15.0
+
+
+def _esperar_cierre_dialogo(ventana) -> None:
+    """
+    Espera a que se cierre el dialogo de seleccion tras aceptarlo. Mientras
+    sigue abierto la ventana esta corrida una posicion y «Validar» no esta en
+    2|1|3|12 (21/10/2026: se busco 1,2 s despues de aceptar y no estaba).
+    """
+    limite = time.monotonic() + ESPERA_CIERRE_DIALOGO_S
+    while time.monotonic() < limite:
+        if not ventana.find(TESORERIA_PAGOS_PATHS['dialogo_seleccion'], search_depth=2,
+                            timeout=0.3, raise_error=False):
+            return
+        time.sleep(0.3)
+    raise windows.ElementNotFound('El dialogo de seleccion no se cerro tras aceptarlo')
 
 
 def pagar_operacion(ventana, num_operacion: str) -> None:
@@ -355,7 +374,8 @@ def pagar_operacion(ventana, num_operacion: str) -> None:
 
     # Validate payment
     ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=1.0)
-    ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=1.0)
+    _esperar_cierre_dialogo(ventana)
+    find_control(ventana, TESORERIA_PAGOS_PATHS['validar_orden_button'], timeout=10.0).click(wait_time=1.0)
     find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
 
 
@@ -905,8 +925,9 @@ def pagar_lista(ventana, num_lista: str, logger: logging.Logger) -> None:
     combo.send_keys(num_lista, interval=0.1, wait_time=0.5, send_enter=True)
 
     ventana.find(TESORERIA_PAGOS_PATHS['validar_op_button']).click(wait_time=1.0)
+    _esperar_cierre_dialogo(ventana)
     seleccionar_todas_las_operaciones(ventana)
-    ventana.find(TESORERIA_PAGOS_PATHS['validar_orden_button']).click(wait_time=1.0)
+    find_control(ventana, TESORERIA_PAGOS_PATHS['validar_orden_button'], timeout=10.0).click(wait_time=1.0)
     find_control(ventana, COMMON_DIALOG_PATHS['info_ok_alt']).click(wait_time=1.0)
 
 
