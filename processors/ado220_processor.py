@@ -735,19 +735,12 @@ class ADO220Processor(SicalOperationProcessor):
             modal_confirm.find(COMMON_DIALOG_PATHS['confirm_yes']).click()
             time.sleep(DEFAULT_TIMING['medium_wait'])
 
-            # Acknowledge information dialog
-            modal_info = wait_for_window(SICAL_WINDOWS['information_dialog'], timeout=15.0)
-            if not modal_info:
-                raise windows.ElementNotFound('Information dialog did not appear within 15s')
-            modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
-            time.sleep(DEFAULT_TIMING['medium_wait'])
-
-            # Decline documentation attach (for now)
-            modal_attach = wait_for_window(SICAL_WINDOWS['confirm_dialog'], timeout=15.0)
-            if not modal_attach:
-                raise windows.ElementNotFound('Attach-document dialog did not appear within 15s')
-            modal_attach.find(COMMON_DIALOG_PATHS['no_button']).click()
-            time.sleep(DEFAULT_TIMING['medium_wait'])
+            # Tras validar, SICAL pregunta si se adjunta documentacion. Desde
+            # la actualizacion del 21/10/2026 ya no avisa antes con
+            # «Information»; si alguna vez lo hace, se cierra y se sigue. El
+            # «Confirm» de adjuntar se distingue del de validar por su handle:
+            # los dos tienen Yes/No, y un No en el de validar la cancelaria.
+            self._cerrar_dialogos_tras_validar(modal_confirm.handle)
 
             # Get assigned operation number
             num_operacion_field = ventana.find(ADO220_FORM_PATHS['num_operacion'], raise_error=False)
@@ -768,6 +761,22 @@ class ADO220Processor(SicalOperationProcessor):
             result.error = f'Validation error: {str(e)}'
 
         return result
+
+    def _cerrar_dialogos_tras_validar(self, handle_validar, timeout: float = 15.0) -> None:
+        """Cierra el aviso «Information», si sale, y contesta No a adjuntar documentacion."""
+        limite = time.monotonic() + timeout
+        while time.monotonic() < limite:
+            modal_info = wait_for_window(SICAL_WINDOWS['information_dialog'], timeout=0.5)
+            if modal_info:
+                modal_info.find(COMMON_DIALOG_PATHS['info_ok']).click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                continue
+            modal_attach = wait_for_window(SICAL_WINDOWS['confirm_dialog'], timeout=0.5)
+            if modal_attach and modal_attach.handle != handle_validar:
+                modal_attach.find(COMMON_DIALOG_PATHS['no_button']).click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                return
+        raise windows.ElementNotFound(f'Attach-document dialog did not appear within {timeout:.0f}s')
 
     def _print_operation_document(self, result: OperationResult, state: str = 'I',
                                   phase: str = 'ADO', confirm_with_ok: bool = False) -> OperationResult:
