@@ -300,3 +300,30 @@ def test_toda_tarea_que_ordena_o_paga_abre_tesoreria_por_abrir_ventana(procesado
         proc.window_manager = proc.create_window_manager()
         assert proc.setup_operation_window()
     assert len(llamadas) == 1
+
+
+class _VentanaConDialogo:
+    """El dialogo de seleccion sigue abierto las `vueltas` primeras busquedas."""
+
+    def __init__(self, vueltas):
+        self.vueltas = vueltas
+
+    def find(self, locator, **kwargs):
+        if locator == tp.TESORERIA_PAGOS_PATHS['dialogo_seleccion'] and self.vueltas > 0:
+            self.vueltas -= 1
+            return object()
+        return None
+
+
+def test_espera_a_que_se_cierre_el_dialogo_antes_de_validar(monkeypatch):
+    monkeypatch.setattr(tp.time, 'sleep', lambda s: None)
+    ventana = _VentanaConDialogo(vueltas=3)
+    tp._esperar_cierre_dialogo(ventana)
+    assert ventana.vueltas == 0
+
+
+def test_si_el_dialogo_no_se_cierra_falla_en_vez_de_validar(monkeypatch):
+    monkeypatch.setattr(tp.time, 'sleep', lambda s: None)
+    monkeypatch.setattr(tp, 'ESPERA_CIERRE_DIALOGO_S', 0.01)
+    with pytest.raises(tp.windows.ElementNotFound):
+        tp._esperar_cierre_dialogo(_VentanaConDialogo(vueltas=10**9))
