@@ -154,7 +154,10 @@ PMP450_FORM_PATHS = {
 # =============================================================================
 
 CONSULTA_FORM_PATHS = {
-    'id_operacion': 'class:"TEdit" and path:"1|38"',
+    # «Nº Operación» con ConOpera recien abierta (21/10/2026, tras actualizar
+    # SICAL: antes 1|38, que ahora es «F. Operación», otro TEdit). Solo vale
+    # recien abierta: al consultar se insertan controles y el path se mueve
+    'id_operacion': 'class:"TEdit" and path:"1|41"',
     'imprimir_button': 'class:"TBitBtn" and name:"Imprimir"',
     'estado_documento': 'class:"TEdit" and path:"1|3"',
     'filtros_button': 'class:"TBitBtn" and name:"Filtros"',
