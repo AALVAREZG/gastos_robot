@@ -43,7 +43,6 @@ from sical_utils import (
     extract_caja_code,
     check_finalize_flag,
     show_windows_message_box,
-    find_element_with_fallback,
     handle_error_cleanup,
 )
 from sical_ui_utils import wait_for_window, find_control
@@ -54,6 +53,31 @@ from sical_security import (
     get_rate_limiter,
     audit_log_force_create,
 )
+
+
+def campos_tesoreria(ventana) -> Dict[str, Any]:
+    """
+    F. Pago, T. Pago y C/B Pagador (caja) del panel de Tesoreria, por su sitio
+    en pantalla y no por path.
+
+    Tras la actualizacion de SICAL del 21/10/2026 el panel tiene una columna
+    izquierda (F. Pago arriba, T. Pago abajo) y otra derecha (C/B Perceptor
+    arriba, solo con algunas formas de pago; C/B Pagador abajo). El orden UIA
+    depende de si existe el perceptor: en una PMP nueva F. Pago es 4|3|5|3|1|3,
+    con el perceptor 4|3|5|3|1|4, y 4|3|5|3|1|2 pasa de T. Pago al perceptor,
+    otro TDBEdit, sin error.
+    """
+    panel = find_control(ventana, PMP450_FORM_PATHS['tesoreria_panel'])
+    edits = panel.find_many('class:"TDBEdit"', search_depth=2, search_strategy='all')
+    mitad = (panel.left + panel.right) / 2
+    izquierda = sorted((e for e in edits if e.left < mitad), key=lambda e: e.top)
+    derecha = sorted((e for e in edits if e.left >= mitad), key=lambda e: e.top)
+    if len(izquierda) != 2 or len(derecha) not in (1, 2):
+        raise windows.ElementNotFound(
+            f'Disposicion de Tesoreria inesperada: {len(izquierda)} campos a la '
+            f'izquierda y {len(derecha)} a la derecha (se esperaban 2 y 1-2). '
+            f'¿Esta marcada Tesoreria?')
+    return {'forma_pago': izquierda[0], 'tipo_pago': izquierda[1], 'caja': derecha[-1]}
 
 
 class PMP450WindowManager(SicalWindowManager):
@@ -748,45 +772,21 @@ class PMP450Processor(SicalOperationProcessor):
         tesoreria_check.click(wait_time=1.0)
         tesoreria_check.send_keys(keys='{Space}', wait_time=wait_time)
 
-        # Forma de pago
-        forma_pago = find_element_with_fallback(
-            ventana,
-            [
-                PMP450_FORM_PATHS['forma_pago_primary'],
-                PMP450_FORM_PATHS['forma_pago_alternate'],
-                PMP450_FORM_PATHS['forma_pago_alternate2'],
-                PMP450_FORM_PATHS['forma_pago_alternate3'],
-            ],
-            raise_error=True
-        )
+        # Forma de pago, tipo de pago y caja. Se localizan una vez, ya marcada
+        # Tesoreria: teclear F. Pago y T. Pago no mueve el panel (27/10/2026)
+        campos = campos_tesoreria(ventana)
+
+        forma_pago = campos['forma_pago']
         forma_pago.double_click(wait_time=wait_time)
         forma_pago.send_keys(keys=operation_data['fpago'], interval=0.01, wait_time=wait_time)
         forma_pago.send_keys(keys='{Enter}', wait_time=wait_time)
 
-        # Tipo de pago
-        tipo_pago = find_element_with_fallback(
-            ventana,
-            [
-                PMP450_FORM_PATHS['tipo_pago_primary'],
-                PMP450_FORM_PATHS['tipo_pago_alternate'],
-                PMP450_FORM_PATHS['tipo_pago_alternate2'],
-                PMP450_FORM_PATHS['tipo_pago_alternate3'],
-            ],
-            raise_error=True
-        )
+        tipo_pago = campos['tipo_pago']
         tipo_pago.double_click(wait_time=wait_time)
         tipo_pago.send_keys(keys=operation_data['tpago'], interval=0.01, wait_time=wait_time)
         tipo_pago.send_keys(keys='{Enter}', wait_time=wait_time)
 
-        # Caja
-        caja_element = find_element_with_fallback(
-            ventana,
-            [
-                PMP450_FORM_PATHS['caja_primary'],
-                PMP450_FORM_PATHS['caja_alternate'],
-            ],
-            raise_error=True
-        )
+        caja_element = campos['caja']
         caja_element.click(wait_time=wait_time)
         caja_element.send_keys(keys=operation_data['caja'], interval=wait_time, wait_time=wait_time)
 
