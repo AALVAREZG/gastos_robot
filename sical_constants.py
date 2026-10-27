@@ -133,7 +133,9 @@ PMP450_FORM_PATHS = {
     'confirm_line_button': 'class:"TBitBtn" and path:"4|2|3"',
 
     # Action buttons
-    'nuevo_button': 'path:"3|4"',
+    # Por nombre: tras actualizar SICAL (21/10/2026) la barra inferior empieza
+    # por «Adjuntar Documento» y 3|4 pasó a ser «Consulta Gral.» (Nuevo: 3|5)
+    'nuevo_button': 'class:"TBitBtn" and name:"Nuevo"',
     'validar_button': 'class:"TBitBtn" and name:"Validar"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
