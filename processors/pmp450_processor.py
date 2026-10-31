@@ -712,8 +712,9 @@ class PMP450Processor(SicalOperationProcessor):
         try:
             # Initialize form - click "Nuevo" button
             ventana.find(PMP450_FORM_PATHS['nuevo_button']).click()
-            button_nuevo_ok_confirm = ventana.find(PMP450_FORM_PATHS['nuevo_ok_button'], raise_error=True)
-            button_nuevo_ok_confirm.click()
+            # Confirm «Si continúa perderá todos los datos de pantalla», hijo de
+            # mona30; sale tambien con la ventana en blanco (27/10/2026)
+            find_control(ventana, PMP450_FORM_PATHS['nuevo_ok_button']).click()
              # Check for select anuality on year-start
             anuanity_select = ventana.find('class:"TDBComboBox" and path:"4|3|3|1"', timeout=0.3, raise_error=False)
 
