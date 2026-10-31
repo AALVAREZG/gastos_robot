@@ -133,8 +133,10 @@ PMP450_FORM_PATHS = {
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
     'nuevo_ok_button': 'class:"TButton" and name:"OK"',
-    'confirm_validar_button':'class:"TButton" and name:"Yes"',
-    'confirm_validar_button_yes':'class:"TButton" and name:"OK"',
+    # Dialogos tras Validar, todos hijos de mona30 (31/10/2026): Confirm de
+    # validar (Yes/No), Information (OK) y Confirm de adjuntar documentacion
+    'dialogo_confirm': 'class:"TMessageForm" and name:"Confirm"',
+    'dialogo_information': 'class:"TMessageForm" and name:"Information"',
 
 
     # Result fields

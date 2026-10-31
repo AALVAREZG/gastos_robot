@@ -72,3 +72,56 @@ def test_disposicion_inesperada_falla(monkeypatch):
 def test_nuevo_se_busca_por_nombre():
     # 3|4 es ahora «Consulta Gral.»
     assert PMP450_FORM_PATHS['nuevo_button'] == 'class:"TBitBtn" and name:"Nuevo"'
+
+
+class _Dialogo:
+    def __init__(self, handle):
+        self.handle = handle
+        self.pulsado = []
+
+    def find(self, locator, **kwargs):
+        dialogo = self
+
+        class _Boton:
+            def click(self, **kw):
+                dialogo.pulsado.append(locator)
+        return _Boton()
+
+
+class _Mona30:
+    """Devuelve, busqueda a busqueda, el Information y los Confirm indicados."""
+
+    def __init__(self, info=None, confirms=()):
+        self.info, self.confirms = info, list(confirms)
+
+    def find(self, locator, **kwargs):
+        if locator == PMP450_FORM_PATHS['dialogo_information']:
+            hallado, self.info = self.info, None
+            return hallado
+        return self.confirms.pop(0) if self.confirms else None
+
+
+@pytest.fixture
+def procesador(monkeypatch):
+    monkeypatch.setattr(pmp.time, 'sleep', lambda s: None)
+    return pmp.PMP450Processor.__new__(pmp.PMP450Processor)
+
+
+def test_validar_cierra_information_y_contesta_no_a_adjuntar(procesador):
+    # Orden visto el 31/10/2026: Confirm validar, Information, Confirm adjuntar
+    validar, info, adjuntar = _Dialogo(1), _Dialogo(2), _Dialogo(3)
+    procesador._cerrar_dialogos_tras_validar(_Mona30(info, [validar, adjuntar]), handle_validar=1)
+    assert info.pulsado == [pmp.COMMON_DIALOG_PATHS['ok_button']]
+    assert validar.pulsado == []
+    assert adjuntar.pulsado == [pmp.COMMON_DIALOG_PATHS['no_button']]
+
+
+def test_validar_sin_information_tambien_vale(procesador):
+    adjuntar = _Dialogo(3)
+    procesador._cerrar_dialogos_tras_validar(_Mona30(confirms=[adjuntar]), handle_validar=1)
+    assert adjuntar.pulsado == [pmp.COMMON_DIALOG_PATHS['no_button']]
+
+
+def test_sin_dialogo_de_adjuntar_falla(procesador):
+    with pytest.raises(windows.ElementNotFound):
+        procesador._cerrar_dialogos_tras_validar(_Mona30(), handle_validar=1, timeout=0.01)

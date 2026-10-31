@@ -853,18 +853,21 @@ class PMP450Processor(SicalOperationProcessor):
             self.logger.info(f'Validating PMP450 operation in window: {ventana}')
             ventana.find(PMP450_FORM_PATHS['validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
 
-            #modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
-            #VALIDATION CONFIRM DIALOG in PMP450 has a different structure than ADO220, 
-            # so we need to adjust the paths. Are childen of the main window, not a separate modal.
-            ventana.find(PMP450_FORM_PATHS['confirm_validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
-            ventana.find(PMP450_FORM_PATHS['confirm_validar_button_yes']).click()
-            time.sleep(DEFAULT_TIMING['long_wait'])
+            # A diferencia de ADO220, los dialogos de PMP450 son hijos de mona30
+            # (mientras estan abiertos renumeran la ventana: todo +1)
+            confirm_validar = find_control(ventana, PMP450_FORM_PATHS['dialogo_confirm'])
+            confirm_validar.find(COMMON_DIALOG_PATHS['yes_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
+            self._cerrar_dialogos_tras_validar(ventana, confirm_validar.handle)
 
-            num_operacion_field = ventana.find(PMP450_FORM_PATHS['num_operacion'], raise_error=False)
-            if num_operacion_field:
-                num_operacion = num_operacion_field.get_value()
-                self.logger.info(f'Operation number assigned: {num_operacion}')
-                result.num_operacion = num_operacion
+            # Sin numero no se sigue: la PMP puede estar validada en SICAL y un
+            # COMPLETED sin numero haria que nadie la ordenara ni la buscara
+            num_operacion_field = find_control(ventana, PMP450_FORM_PATHS['num_operacion'])
+            num_operacion = (num_operacion_field.get_value() or '').strip()
+            if not num_operacion:
+                raise windows.ElementNotFound(
+                    'Validada sin numero de operacion legible: comprobar en SICAL antes de reenviar')
+            self.logger.info(f'Operation number assigned: {num_operacion}')
+            result.num_operacion = num_operacion
 
             ventana.find(PMP450_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
 
@@ -877,6 +880,30 @@ class PMP450Processor(SicalOperationProcessor):
             result.error = f'Validation error: {str(e)}'
 
         return result
+
+    def _cerrar_dialogos_tras_validar(self, ventana, handle_validar, timeout: float = 15.0) -> None:
+        """
+        Cierra «Information», si sale, y contesta No a adjuntar documentacion.
+
+        Visto el 31/10/2026 (PMP 326100250): Confirm de validar, Information y
+        Confirm de adjuntar, todos hijos de mona30. El de adjuntar se distingue
+        del de validar por su handle: los dos tienen Yes/No.
+        """
+        limite = time.monotonic() + timeout
+        while time.monotonic() < limite:
+            info = ventana.find(PMP450_FORM_PATHS['dialogo_information'], search_depth=1,
+                                timeout=0.5, raise_error=False)
+            if info:
+                info.find(COMMON_DIALOG_PATHS['ok_button']).click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                continue
+            adjuntar = ventana.find(PMP450_FORM_PATHS['dialogo_confirm'], search_depth=1,
+                                    timeout=0.5, raise_error=False)
+            if adjuntar and adjuntar.handle != handle_validar:
+                adjuntar.find(COMMON_DIALOG_PATHS['no_button']).click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                return
+        raise windows.ElementNotFound(f'Attach-document dialog did not appear within {timeout:.0f}s')
 
     def _print_operation_document(self, result: OperationResult, state: str = 'I',
                                   phase: str = 'PMP', confirm_with_ok: bool = False) -> OperationResult:
