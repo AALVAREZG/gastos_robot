@@ -1,12 +1,14 @@
 """Dialogos que salen tras validar un ADO220 (SICAL actualizado el 21/10/2026)."""
 
 import logging
+from types import SimpleNamespace
 
 import pytest
 from robocorp import windows
 
 import processors.ado220_processor as ado
-from sical_constants import SICAL_WINDOWS
+from sical_base import OperationResult, OperationStatus
+from sical_constants import ADO220_FORM_PATHS, SICAL_WINDOWS
 
 
 class _Dialogo:
@@ -69,3 +71,57 @@ def test_sin_dialogo_de_adjuntar_falla(procesador, monkeypatch):
     _ventanas(monkeypatch)
     with pytest.raises(windows.ElementNotFound):
         procesador._cerrar_dialogos_tras_validar(handle_validar=1, timeout=0.01)
+
+
+class _Campo:
+    def __init__(self, valor):
+        self.valor = valor
+
+    def get_value(self):
+        return self.valor
+
+
+class _New30:
+    """Ventana del ADO: botones que se pulsan y el campo del nº de operacion."""
+
+    def __init__(self, campo):
+        self.campo = campo
+        self.pulsado = []
+
+    def find(self, locator, **kwargs):
+        if locator == ADO220_FORM_PATHS['num_operacion']:
+            return self.campo
+        ventana = self
+
+        class _Boton:
+            def click(self, **kw):
+                ventana.pulsado.append(locator)
+        return _Boton()
+
+
+def _validar(procesador, monkeypatch, campo):
+    ventana = _New30(campo)
+    procesador.window_manager = SimpleNamespace(ventana_proceso=ventana)
+    procesador.logger = logging.getLogger('test')
+    procesador.phase_clock = SimpleNamespace(mark=lambda *a, **k: None)
+    monkeypatch.setattr(ado, 'wait_for_window', lambda locator, timeout=15.0: _Dialogo(handle=1))
+    monkeypatch.setattr(procesador, '_cerrar_dialogos_tras_validar', lambda handle: None)
+    resultado = OperationResult(status=OperationStatus.PENDING, init_time='')
+    return procesador._validate_operation(resultado), ventana
+
+
+@pytest.mark.parametrize('campo', [None, _Campo(''), _Campo('   ')])
+def test_validada_sin_numero_falla_avisando_de_que_puede_estar_hecha(procesador, monkeypatch, campo):
+    # 01/11/2026: validada en SICAL, numero sin leer, devuelta como COMPLETED
+    resultado, _ = _validar(procesador, monkeypatch, campo)
+    assert resultado.status == OperationStatus.FAILED
+    assert resultado.num_operacion is None
+    assert 'puede estar ya terminada en SICAL' in resultado.error
+    assert 'comprobar en SICAL antes de reenviar' in resultado.error
+
+
+def test_validada_con_numero_sigue(procesador, monkeypatch):
+    resultado, ventana = _validar(procesador, monkeypatch, _Campo(' 226102999 '))
+    assert resultado.status == OperationStatus.COMPLETED
+    assert resultado.num_operacion == '226102999'
+    assert ADO220_FORM_PATHS['salir_button'] in ventana.pulsado

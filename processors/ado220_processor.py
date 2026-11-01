@@ -742,12 +742,19 @@ class ADO220Processor(SicalOperationProcessor):
             # los dos tienen Yes/No, y un No en el de validar la cancelaria.
             self._cerrar_dialogos_tras_validar(modal_confirm.handle)
 
-            # Get assigned operation number
+            # Sin numero no se sigue. Visto el 01/11/2026 (ADO del consorcio):
+            # SICAL pidio confirmar y adjuntar, que solo pasa si valida, pero el
+            # numero no se leyo. El COMPLETED sin numero hacia que nadie la
+            # ordenara ni pagara, y un reintento a ciegas la duplicaria.
             num_operacion_field = ventana.find(ADO220_FORM_PATHS['num_operacion'], raise_error=False)
-            if num_operacion_field:
-                num_operacion = num_operacion_field.get_value()
-                self.logger.info(f'Operation number assigned: {num_operacion}')
-                result.num_operacion = num_operacion
+            num_operacion = (num_operacion_field.get_value() or '').strip() if num_operacion_field else ''
+            if not num_operacion:
+                raise windows.ElementNotFound(
+                    'Validada sin numero de operacion legible: la operacion puede estar ya '
+                    'terminada en SICAL (validada, sin ordenar ni pagar); comprobar en SICAL '
+                    'antes de reenviar')
+            self.logger.info(f'Operation number assigned: {num_operacion}')
+            result.num_operacion = num_operacion
 
             # Exit the form
             ventana.find(ADO220_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
