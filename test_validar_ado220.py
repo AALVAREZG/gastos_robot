@@ -81,16 +81,33 @@ class _Campo:
         return self.valor
 
 
-class _New30:
-    """Ventana del ADO: botones que se pulsan y el campo del nº de operacion."""
+class _Pestana:
+    """Pestaña «Aplicaciones»: con aviso, un TPanel cuyo nombre es el texto."""
 
-    def __init__(self, campo):
+    def __init__(self, aviso):
+        self.aviso = aviso
+
+    def find(self, locator, **kwargs):
+        assert locator == ADO220_FORM_PATHS['aviso_aplicaciones']
+        assert kwargs.get('search_depth') == 1
+        if isinstance(self.aviso, Exception):
+            raise self.aviso
+        return SimpleNamespace(name=self.aviso) if self.aviso is not None else None
+
+
+class _New30:
+    """Ventana del ADO: botones que se pulsan, el nº de operacion y el aviso."""
+
+    def __init__(self, campo, aviso=None):
         self.campo = campo
+        self.aviso = aviso
         self.pulsado = []
 
     def find(self, locator, **kwargs):
         if locator == ADO220_FORM_PATHS['num_operacion']:
             return self.campo
+        if locator == ADO220_FORM_PATHS['pestana_aplicaciones']:
+            return _Pestana(self.aviso)
         ventana = self
 
         class _Boton:
@@ -99,15 +116,37 @@ class _New30:
         return _Boton()
 
 
-def _validar(procesador, monkeypatch, campo):
-    ventana = _New30(campo)
+def _validar(procesador, monkeypatch, campo, aviso=None, sin_adjuntar=False):
+    ventana = _New30(campo, aviso)
     procesador.window_manager = SimpleNamespace(ventana_proceso=ventana)
     procesador.logger = logging.getLogger('test')
     procesador.phase_clock = SimpleNamespace(mark=lambda *a, **k: None)
     monkeypatch.setattr(ado, 'wait_for_window', lambda locator, timeout=15.0: _Dialogo(handle=1))
-    monkeypatch.setattr(procesador, '_cerrar_dialogos_tras_validar', lambda handle: None)
+
+    def cerrar(handle):
+        if sin_adjuntar:
+            raise windows.ElementNotFound('Attach-document dialog did not appear within 15s')
+    monkeypatch.setattr(procesador, '_cerrar_dialogos_tras_validar', cerrar)
     resultado = OperationResult(status=OperationStatus.PENDING, init_time='')
     return procesador._validate_operation(resultado), ventana
+
+
+def test_sin_credito_el_error_es_el_aviso_de_sical(procesador, monkeypatch):
+    # 01/11/2026, intereses a 920.352: SICAL no valida, pinta el aviso en rojo
+    # y no saca el dialogo de adjuntar
+    aviso = 'SALDO DISP. EN VINCULACION INSUFICIENTE PARA LA APLICACION   - 920 - 352 -'
+    resultado, _ = _validar(procesador, monkeypatch, _Campo(''), aviso=aviso, sin_adjuntar=True)
+    assert resultado.status == OperationStatus.FAILED
+    assert resultado.error == (
+        'Validation error: SICAL: «SALDO DISP. EN VINCULACION INSUFICIENTE PARA LA APLICACION'
+        ' - 920 - 352 -» (Attach-document dialog did not appear within 15s)')
+
+
+@pytest.mark.parametrize('aviso', [None, '', '   ', RuntimeError('`root_element` no longer valid')])
+def test_sin_aviso_legible_queda_el_error_original(procesador, monkeypatch, aviso):
+    resultado, _ = _validar(procesador, monkeypatch, _Campo(''), aviso=aviso, sin_adjuntar=True)
+    assert resultado.status == OperationStatus.FAILED
+    assert resultado.error == 'Validation error: Attach-document dialog did not appear within 15s'
 
 
 @pytest.mark.parametrize('campo', [None, _Campo(''), _Campo('   ')])

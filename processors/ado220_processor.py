@@ -763,11 +763,32 @@ class ADO220Processor(SicalOperationProcessor):
             self.phase_clock.mark(result, 'validation', f'Operation validated: {result.num_operacion}')
 
         except Exception as e:
-            self.logger.error(f'Validation error: {e}')
+            # Sin credito (01/11/2026, intereses a 920.352) SICAL no valida ni
+            # saca dialogo: solo pinta el aviso en rojo bajo las aplicaciones, y
+            # el error decia «no salio el dialogo de adjuntar». El aviso de SICAL
+            # va delante, que es lo que hay que resolver.
+            aviso = self._aviso_aplicaciones(ventana)
+            mensaje = f'SICAL: «{aviso}» ({e})' if aviso else str(e)
+            self.logger.error(f'Validation error: {mensaje}')
             result.status = OperationStatus.FAILED
-            result.error = f'Validation error: {str(e)}'
+            result.error = f'Validation error: {mensaje}'
 
         return result
+
+    def _aviso_aplicaciones(self, ventana) -> str:
+        """Texto del aviso en rojo bajo las aplicaciones, o '' si no hay o no se lee."""
+        try:
+            pestana = ventana.find(ADO220_FORM_PATHS['pestana_aplicaciones'],
+                                   timeout=1.0, raise_error=False)
+            if not pestana:
+                return ''
+            aviso = pestana.find(ADO220_FORM_PATHS['aviso_aplicaciones'], search_depth=1,
+                                 timeout=1.0, raise_error=False)
+            # SICAL rellena con espacios: «APLICACION   - 920 - 352 -»
+            return ' '.join((aviso.name or '').split()) if aviso else ''
+        except Exception:
+            # Leer el aviso es un extra: nunca tapa el error que se esta dando
+            return ''
 
     def _cerrar_dialogos_tras_validar(self, handle_validar, timeout: float = 15.0) -> None:
         """Cierra el aviso «Information», si sale, y contesta No a adjuntar documentacion."""

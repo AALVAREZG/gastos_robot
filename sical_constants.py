@@ -85,6 +85,12 @@ ADO220_FORM_PATHS = {
     # Text and aplicaciones
     'texto': 'path:"3|1|1" and class:"TDBMemo"',
     'aplicaciones_grid': 'path:"3|2|1|1"',
+    # Aviso en rojo bajo las aplicaciones («SALDO DISP. EN VINCULACION
+    # INSUFICIENTE...»). En el volcado del 01/11/2026 es el unico TPanel de la
+    # pestaña y va delante de la rejilla (3|2|1|1 pasa a ser el aviso): se
+    # busca dentro de la pestaña, que tiene nombre. El texto esta en su nombre.
+    'pestana_aplicaciones': 'class:"TTabSheet" and name:"Aplicaciones"',
+    'aviso_aplicaciones': 'class:"TPanel"',
     'new_line_button': 'class:"TBitBtn" and path:"3|3|3"',
     'confirm_line_button': 'class:"TBitBtn" and path:"3|3|5"',
 
