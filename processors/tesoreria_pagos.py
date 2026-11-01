@@ -299,10 +299,29 @@ def ordenar_operacion(ventana, num_operacion: str, logger: logging.Logger) -> bo
 
     # Operation already ordered - skip ordering
     logger.info('Operation already ordered, skipping to payment')
-    find_control(ventana, COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
-    find_control(ventana, COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
-    ventana.find(TESORERIA_PAGOS_PATHS['cancel_operation_button']).click(wait_time=0.8)
+    cerrados = _cerrar_errores(ventana)
+    logger.info(f'Dialogos de error cerrados al ordenar: {cerrados}')
+    find_control(ventana, TESORERIA_PAGOS_PATHS['cancel_operation_button']).click(wait_time=0.8)
     return False
+
+
+MAX_ERRORES_AL_ORDENAR = 6
+
+
+def _cerrar_errores(ventana) -> int:
+    """
+    Cierra todos los «Error» que saca SICAL al teclear una operacion que no se
+    puede ordenar. No son siempre dos: con la 326100251, ya pagada, fueron tres
+    (01/11/2026), y con uno abierto la ventana corre una posicion y «Cancelar»
+    no esta en 1|1|2.
+    """
+    for cerrados in range(MAX_ERRORES_AL_ORDENAR):
+        error = ventana.find('class:"TMessageForm"', search_depth=1, timeout=1.5, raise_error=False)
+        if not error:
+            return cerrados
+        error.find(COMMON_DIALOG_PATHS['ok_button']).click(wait_time=0.8)
+    raise windows.ElementNotFound(
+        f'SICAL sigue mostrando errores tras cerrar {MAX_ERRORES_AL_ORDENAR} al ordenar')
 
 
 def _completar_ordenacion(ventana) -> None:

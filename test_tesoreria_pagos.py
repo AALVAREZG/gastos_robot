@@ -327,3 +327,35 @@ def test_si_el_dialogo_no_se_cierra_falla_en_vez_de_validar(monkeypatch):
     monkeypatch.setattr(tp, 'ESPERA_CIERRE_DIALOGO_S', 0.01)
     with pytest.raises(tp.windows.ElementNotFound):
         tp._esperar_cierre_dialogo(_VentanaConDialogo(vueltas=10**9))
+
+
+class _VentanaConErrores:
+    """Tiene `errores` dialogos «Error» apilados; cada OK cierra uno."""
+
+    def __init__(self, errores):
+        self.errores = errores
+
+    def find(self, locator, **kwargs):
+        if locator != 'class:"TMessageForm"' or self.errores == 0:
+            return None
+        ventana = self
+
+        class _Error:
+            def find(self, loc, **kw):
+                class _Ok:
+                    def click(self, **k):
+                        ventana.errores -= 1
+                return _Ok()
+        return _Error()
+
+
+@pytest.mark.parametrize('errores', [1, 2, 3])
+def test_cierra_todos_los_errores_al_ordenar(errores):
+    ventana = _VentanaConErrores(errores)
+    assert tp._cerrar_errores(ventana) == errores
+    assert ventana.errores == 0
+
+
+def test_si_los_errores_no_acaban_falla():
+    with pytest.raises(tp.windows.ElementNotFound):
+        tp._cerrar_errores(_VentanaConErrores(10**9))
