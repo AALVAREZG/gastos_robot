@@ -114,17 +114,10 @@ PMP450_FORM_PATHS = {
     'tercero': 'class:"TDBEdit" and path:"4|3|5|4|1"',
     'tesoreria_check': 'class:"TDBCheckBox" and name:"Tesorería"',
 
-    # Payment form elements
-    'forma_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|4"',
-    'forma_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|3"',
-    'forma_pago_alternate2': 'class:"TDBEdit" and path:"4|3|5|4|3"',
-    'forma_pago_alternate3': 'class:"TDBEdit" and path:"4|3|5|3|1|3"',
-    'tipo_pago_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|2"',
-    'tipo_pago_alternate': 'class:"TDBEdit" and path:"3|5|5|9|2"',
-    'tipo_pago_alternate2': 'class:"TDBEdit" and path:"|3|5|3|1|2"',
-    'tipo_pago_alternate3': 'class:"TDBEdit" and path:"|3|5|3|1|2"',
-    'caja_primary': 'class:"TDBEdit" and path:"4|3|5|3|1|1"',
-    'caja_alternate': 'class:"TDBEdit" and path:"3|5|5|9|1"',
+    # Panel de Tesoreria. F. Pago, T. Pago y C/B Pagador se toman por su sitio
+    # en pantalla (pmp450_processor.campos_tesoreria): el orden UIA de sus
+    # TDBEdit cambia segun exista «C/B Perceptor» (21/10/2026)
+    'tesoreria_panel': 'class:"TfraTesoreria"',
 
     # Text and aplicaciones
     'texto': 'class:"TDBMemo" and path:"4|3|1|1"',
@@ -133,13 +126,17 @@ PMP450_FORM_PATHS = {
     'confirm_line_button': 'class:"TBitBtn" and path:"4|2|3"',
 
     # Action buttons
-    'nuevo_button': 'path:"3|4"',
+    # Por nombre: tras actualizar SICAL (21/10/2026) la barra inferior empieza
+    # por «Adjuntar Documento» y 3|4 pasó a ser «Consulta Gral.» (Nuevo: 3|5)
+    'nuevo_button': 'class:"TBitBtn" and name:"Nuevo"',
     'validar_button': 'class:"TBitBtn" and name:"Validar"',
     'salir_button': 'class:"TBitBtn" and name:"Salir"',
     'cerrar_button': 'name:"Cerrar"',
     'nuevo_ok_button': 'class:"TButton" and name:"OK"',
-    'confirm_validar_button':'class:"TButton" and name:"Yes"',
-    'confirm_validar_button_yes':'class:"TButton" and name:"OK"',
+    # Dialogos tras Validar, todos hijos de mona30 (31/10/2026): Confirm de
+    # validar (Yes/No), Information (OK) y Confirm de adjuntar documentacion
+    'dialogo_confirm': 'class:"TMessageForm" and name:"Confirm"',
+    'dialogo_information': 'class:"TMessageForm" and name:"Information"',
 
 
     # Result fields

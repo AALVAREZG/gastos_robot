@@ -43,7 +43,6 @@ from sical_utils import (
     extract_caja_code,
     check_finalize_flag,
     show_windows_message_box,
-    find_element_with_fallback,
     handle_error_cleanup,
 )
 from sical_ui_utils import wait_for_window, find_control
@@ -54,6 +53,31 @@ from sical_security import (
     get_rate_limiter,
     audit_log_force_create,
 )
+
+
+def campos_tesoreria(ventana) -> Dict[str, Any]:
+    """
+    F. Pago, T. Pago y C/B Pagador (caja) del panel de Tesoreria, por su sitio
+    en pantalla y no por path.
+
+    Tras la actualizacion de SICAL del 21/10/2026 el panel tiene una columna
+    izquierda (F. Pago arriba, T. Pago abajo) y otra derecha (C/B Perceptor
+    arriba, solo con algunas formas de pago; C/B Pagador abajo). El orden UIA
+    depende de si existe el perceptor: en una PMP nueva F. Pago es 4|3|5|3|1|3,
+    con el perceptor 4|3|5|3|1|4, y 4|3|5|3|1|2 pasa de T. Pago al perceptor,
+    otro TDBEdit, sin error.
+    """
+    panel = find_control(ventana, PMP450_FORM_PATHS['tesoreria_panel'])
+    edits = panel.find_many('class:"TDBEdit"', search_depth=2, search_strategy='all')
+    mitad = (panel.left + panel.right) / 2
+    izquierda = sorted((e for e in edits if e.left < mitad), key=lambda e: e.top)
+    derecha = sorted((e for e in edits if e.left >= mitad), key=lambda e: e.top)
+    if len(izquierda) != 2 or len(derecha) not in (1, 2):
+        raise windows.ElementNotFound(
+            f'Disposicion de Tesoreria inesperada: {len(izquierda)} campos a la '
+            f'izquierda y {len(derecha)} a la derecha (se esperaban 2 y 1-2). '
+            f'¿Esta marcada Tesoreria?')
+    return {'forma_pago': izquierda[0], 'tipo_pago': izquierda[1], 'caja': derecha[-1]}
 
 
 class PMP450WindowManager(SicalWindowManager):
@@ -688,8 +712,9 @@ class PMP450Processor(SicalOperationProcessor):
         try:
             # Initialize form - click "Nuevo" button
             ventana.find(PMP450_FORM_PATHS['nuevo_button']).click()
-            button_nuevo_ok_confirm = ventana.find(PMP450_FORM_PATHS['nuevo_ok_button'], raise_error=True)
-            button_nuevo_ok_confirm.click()
+            # Confirm «Si continúa perderá todos los datos de pantalla», hijo de
+            # mona30; sale tambien con la ventana en blanco (27/10/2026)
+            find_control(ventana, PMP450_FORM_PATHS['nuevo_ok_button']).click()
              # Check for select anuality on year-start
             anuanity_select = ventana.find('class:"TDBComboBox" and path:"4|3|3|1"', timeout=0.3, raise_error=False)
 
@@ -748,45 +773,21 @@ class PMP450Processor(SicalOperationProcessor):
         tesoreria_check.click(wait_time=1.0)
         tesoreria_check.send_keys(keys='{Space}', wait_time=wait_time)
 
-        # Forma de pago
-        forma_pago = find_element_with_fallback(
-            ventana,
-            [
-                PMP450_FORM_PATHS['forma_pago_primary'],
-                PMP450_FORM_PATHS['forma_pago_alternate'],
-                PMP450_FORM_PATHS['forma_pago_alternate2'],
-                PMP450_FORM_PATHS['forma_pago_alternate3'],
-            ],
-            raise_error=True
-        )
+        # Forma de pago, tipo de pago y caja. Se localizan una vez, ya marcada
+        # Tesoreria: teclear F. Pago y T. Pago no mueve el panel (27/10/2026)
+        campos = campos_tesoreria(ventana)
+
+        forma_pago = campos['forma_pago']
         forma_pago.double_click(wait_time=wait_time)
         forma_pago.send_keys(keys=operation_data['fpago'], interval=0.01, wait_time=wait_time)
         forma_pago.send_keys(keys='{Enter}', wait_time=wait_time)
 
-        # Tipo de pago
-        tipo_pago = find_element_with_fallback(
-            ventana,
-            [
-                PMP450_FORM_PATHS['tipo_pago_primary'],
-                PMP450_FORM_PATHS['tipo_pago_alternate'],
-                PMP450_FORM_PATHS['tipo_pago_alternate2'],
-                PMP450_FORM_PATHS['tipo_pago_alternate3'],
-            ],
-            raise_error=True
-        )
+        tipo_pago = campos['tipo_pago']
         tipo_pago.double_click(wait_time=wait_time)
         tipo_pago.send_keys(keys=operation_data['tpago'], interval=0.01, wait_time=wait_time)
         tipo_pago.send_keys(keys='{Enter}', wait_time=wait_time)
 
-        # Caja
-        caja_element = find_element_with_fallback(
-            ventana,
-            [
-                PMP450_FORM_PATHS['caja_primary'],
-                PMP450_FORM_PATHS['caja_alternate'],
-            ],
-            raise_error=True
-        )
+        caja_element = campos['caja']
         caja_element.click(wait_time=wait_time)
         caja_element.send_keys(keys=operation_data['caja'], interval=wait_time, wait_time=wait_time)
 
@@ -853,18 +854,21 @@ class PMP450Processor(SicalOperationProcessor):
             self.logger.info(f'Validating PMP450 operation in window: {ventana}')
             ventana.find(PMP450_FORM_PATHS['validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
 
-            #modal_confirm = windows.find_window(SICAL_WINDOWS['confirm_dialog'])
-            #VALIDATION CONFIRM DIALOG in PMP450 has a different structure than ADO220, 
-            # so we need to adjust the paths. Are childen of the main window, not a separate modal.
-            ventana.find(PMP450_FORM_PATHS['confirm_validar_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
-            ventana.find(PMP450_FORM_PATHS['confirm_validar_button_yes']).click()
-            time.sleep(DEFAULT_TIMING['long_wait'])
+            # A diferencia de ADO220, los dialogos de PMP450 son hijos de mona30
+            # (mientras estan abiertos renumeran la ventana: todo +1)
+            confirm_validar = find_control(ventana, PMP450_FORM_PATHS['dialogo_confirm'])
+            confirm_validar.find(COMMON_DIALOG_PATHS['yes_button']).click(wait_time=DEFAULT_TIMING['default_wait'])
+            self._cerrar_dialogos_tras_validar(ventana, confirm_validar.handle)
 
-            num_operacion_field = ventana.find(PMP450_FORM_PATHS['num_operacion'], raise_error=False)
-            if num_operacion_field:
-                num_operacion = num_operacion_field.get_value()
-                self.logger.info(f'Operation number assigned: {num_operacion}')
-                result.num_operacion = num_operacion
+            # Sin numero no se sigue: la PMP puede estar validada en SICAL y un
+            # COMPLETED sin numero haria que nadie la ordenara ni la buscara
+            num_operacion_field = find_control(ventana, PMP450_FORM_PATHS['num_operacion'])
+            num_operacion = (num_operacion_field.get_value() or '').strip()
+            if not num_operacion:
+                raise windows.ElementNotFound(
+                    'Validada sin numero de operacion legible: comprobar en SICAL antes de reenviar')
+            self.logger.info(f'Operation number assigned: {num_operacion}')
+            result.num_operacion = num_operacion
 
             ventana.find(PMP450_FORM_PATHS['salir_button']).click(wait_time=DEFAULT_TIMING['medium_wait'])
 
@@ -877,6 +881,30 @@ class PMP450Processor(SicalOperationProcessor):
             result.error = f'Validation error: {str(e)}'
 
         return result
+
+    def _cerrar_dialogos_tras_validar(self, ventana, handle_validar, timeout: float = 15.0) -> None:
+        """
+        Cierra «Information», si sale, y contesta No a adjuntar documentacion.
+
+        Visto el 31/10/2026 (PMP 326100250): Confirm de validar, Information y
+        Confirm de adjuntar, todos hijos de mona30. El de adjuntar se distingue
+        del de validar por su handle: los dos tienen Yes/No.
+        """
+        limite = time.monotonic() + timeout
+        while time.monotonic() < limite:
+            info = ventana.find(PMP450_FORM_PATHS['dialogo_information'], search_depth=1,
+                                timeout=0.5, raise_error=False)
+            if info:
+                info.find(COMMON_DIALOG_PATHS['ok_button']).click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                continue
+            adjuntar = ventana.find(PMP450_FORM_PATHS['dialogo_confirm'], search_depth=1,
+                                    timeout=0.5, raise_error=False)
+            if adjuntar and adjuntar.handle != handle_validar:
+                adjuntar.find(COMMON_DIALOG_PATHS['no_button']).click()
+                time.sleep(DEFAULT_TIMING['medium_wait'])
+                return
+        raise windows.ElementNotFound(f'Attach-document dialog did not appear within {timeout:.0f}s')
 
     def _print_operation_document(self, result: OperationResult, state: str = 'I',
                                   phase: str = 'PMP', confirm_with_ok: bool = False) -> OperationResult:
