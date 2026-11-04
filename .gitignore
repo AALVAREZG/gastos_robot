@@ -34,3 +34,6 @@ data/doc_work/
 
 # Rastro de ejecucion (run_trace)
 logs/
+
+# Registro de auditoria de creaciones forzadas (lleva CIF de terceros e importes)
+security_audit.jsonl
